@@ -335,6 +335,12 @@ ML_POLICY_FIVE_DOLLAR_MIN_UTILITY_USDC = 0.18
 ML_POLICY_WAIT_UTILITY_USDC = 0.05
 ML_POLICY_SKIP_SIGNAL_CONFIRMATION = True
 ML_POLICY_REQUIRE_FRESH_DATA = True
+# Активный PAPER-сбор: сначала модель свободно ждёт сильный сигнал, но в конце
+# разрешённого окна должна выбрать лучший исполнимый вход. Почти случайный
+# прогноз, плохие данные и технически невалидный стакан по-прежнему разрешают WAIT.
+PAPER_ACTIVE_COLLECTION_ENABLED = True
+PAPER_ACTIVE_COLLECTION_FORCE_ENTRY_REMAINING_SECONDS = 90
+PAPER_ACTIVE_COLLECTION_MIN_DIRECTION_CONFIDENCE = 0.54
 DIRECTION_COLLAPSE_WINDOW_EVENTS = 30
 DIRECTION_COLLAPSE_MIN_EVENTS = 15
 DIRECTION_COLLAPSE_MAX_SHARE = 0.90

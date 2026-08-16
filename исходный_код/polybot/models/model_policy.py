@@ -428,6 +428,7 @@ def decide_with_model(
     state: MarketState,
     position: PositionState | None = None,
     model_key: str = "custom",
+    active_collection: bool = False,
 ) -> Decision:
     if not model_is_ready(model_key):
         return Decision("HOLD" if position else "WAIT", 0.0, "Выбранная модель не установлена", ["model_not_ready", f"model={model_key}"])
@@ -438,6 +439,7 @@ def decide_with_model(
         return decide_autonomously(
             state, position, {"Up": p_up, "Down": 1.0 - p_up}, model_key,
             [*tags, f"direction_hint={direction}"],
+            active_collection=active_collection,
         )
     guard = _preflight(state, position)
     if guard:

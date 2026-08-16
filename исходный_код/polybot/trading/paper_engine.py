@@ -1635,7 +1635,10 @@ class PaperEngine:
         # Не держим SQLite write-lock во время вычисления shadow-моделей.
         self.db.commit()
         self._shadow_tournament(state, position, entry_model_key)
-        decision = decide_with_model(state, position, model_key)
+        decision = decide_with_model(
+            state, position, model_key,
+            active_collection=(trading_mode == "paper"),
+        )
         # До записи решения проверяем, что оно технически исполнимо. Иначе dashboard
         # показывал BUY, хотя _buy молча отклонял старый стакан или закрытое событие.
         if position is None and decision.action.startswith("BUY_"):

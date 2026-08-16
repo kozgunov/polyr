@@ -48,6 +48,7 @@ def decide(
     probabilities: dict[str, float],
     model_key: str,
     base_tags: list[str] | None = None,
+    active_collection: bool = False,
 ) -> Decision:
     guard = _technical_guard(state, position)
     if guard is not None:
@@ -74,12 +75,23 @@ def decide(
 
     direction = max(("Up", "Down"), key=lambda outcome: float(probabilities.get(outcome, 0.0)))
     direction_probability = float(probabilities.get(direction, 0.0))
-    if not math.isfinite(direction_probability) or direction_probability < settings.ML_POLICY_MIN_DIRECTION_CONFIDENCE:
+    collection_deadline = bool(
+        active_collection
+        and settings.PAPER_ACTIVE_COLLECTION_ENABLED
+        and settings.PAPER_LAST_ENTRY_SECONDS_BEFORE_CLOSE < state.remaining_seconds
+        <= settings.PAPER_ACTIVE_COLLECTION_FORCE_ENTRY_REMAINING_SECONDS
+    )
+    minimum_direction_confidence = (
+        settings.PAPER_ACTIVE_COLLECTION_MIN_DIRECTION_CONFIDENCE
+        if collection_deadline else settings.ML_POLICY_MIN_DIRECTION_CONFIDENCE
+    )
+    if not math.isfinite(direction_probability) or direction_probability < minimum_direction_confidence:
         tags.extend([
             "direction_preserved_from_entry_model",
             "entry_model_low_confidence_wait",
             f"selected_direction={direction}",
             f"selected_outcome_probability={direction_probability:.6f}",
+            f"minimum_direction_confidence={minimum_direction_confidence:.6f}",
         ])
         return Decision(
             "WAIT", max(0.0, min(1.0, direction_probability)),
@@ -87,10 +99,18 @@ def decide(
             tags,
         )
 
-    candidates: list[dict[str, Any]] = [{
-        "action": "WAIT", "utility": float(settings.ML_POLICY_WAIT_UTILITY_USDC),
-        "direction": None, "price": None, "notional": 0.0, "level": "wait", "parts": {},
-    }]
+    candidates: list[dict[str, Any]] = []
+    if not collection_deadline:
+        candidates.append({
+            "action": "WAIT", "utility": float(settings.ML_POLICY_WAIT_UTILITY_USDC),
+            "direction": None, "price": None, "notional": 0.0, "level": "wait", "parts": {},
+        })
+    else:
+        tags.extend([
+            "paper_active_collection",
+            "paper_forced_best_executable_entry",
+            f"collection_deadline_remaining={state.remaining_seconds:.3f}",
+        ])
     # Направление события выбирает только калиброванная entry-модель. Value-слой
     # оптимизирует лимит и размер либо выбирает WAIT, но не может купить обратную сторону.
     outcomes = (direction,) if settings.ML_POLICY_DIRECTION_PRESERVING else ("Up", "Down")
@@ -115,6 +135,13 @@ def decide(
                     "action": f"BUY_{outcome.upper()}", "utility": float(utility), "direction": outcome,
                     "price": price, "notional": notional, "level": level, "parts": parts,
                 })
+    if not candidates:
+        return Decision(
+            "WAIT", max(0.0, min(1.0, direction_probability)),
+            "Активный PAPER-сбор не нашёл исполнимой лимитной цены",
+            [*tags, "paper_active_collection_no_executable_candidate"],
+            direction=direction,
+        )
     ranked = sorted(candidates, key=lambda item: item["utility"], reverse=True)
     best = ranked[0]
     runner_up = next(

@@ -82,6 +82,44 @@ def test_ml_policy_waits_when_wait_has_highest_utility(monkeypatch: pytest.Monke
     assert "ml_entry_argmax" in decision.tags
 
 
+def test_active_collection_forces_best_trade_near_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(autonomous_policy, "expected_pnl", lambda *_: (-0.1, {"learned": -0.1}))
+    current = market_state()
+    current.remaining_seconds = 75
+    decision = autonomous_policy.decide(
+        current, None, {"Up": 0.56, "Down": 0.44}, "custom", active_collection=True,
+    )
+    assert decision.action == "BUY_UP"
+    assert "paper_active_collection" in decision.tags
+    assert "paper_forced_best_executable_entry" in decision.tags
+
+
+def test_active_collection_keeps_wait_for_near_random_prediction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(autonomous_policy, "expected_pnl", lambda *_: (10.0, {"learned": 10.0}))
+    current = market_state()
+    current.remaining_seconds = 75
+    decision = autonomous_policy.decide(
+        current, None, {"Up": 0.52, "Down": 0.48}, "custom", active_collection=True,
+    )
+    assert decision.action == "WAIT"
+    assert "entry_model_low_confidence_wait" in decision.tags
+
+
+def test_active_collection_does_not_force_before_collection_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(autonomous_policy, "expected_pnl", lambda *_: (-0.1, {"learned": -0.1}))
+    current = market_state()
+    current.remaining_seconds = 150
+    decision = autonomous_policy.decide(
+        current, None, {"Up": 0.75, "Down": 0.25}, "custom", active_collection=True,
+    )
+    assert decision.action == "WAIT"
+    assert "paper_active_collection" not in decision.tags
+
+
 def test_ml_exit_directly_chooses_close_without_manual_stages(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(autonomous_policy, "compare_exit_value", lambda *_: {
         "close_pnl": 0.2, "hold_pnl": -0.4, "close_advantage": 0.6,
