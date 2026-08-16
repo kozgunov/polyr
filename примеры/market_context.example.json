@@ -1,0 +1,27 @@
+{
+  "market": {
+    "event": "BTC Up or Down — next 5 minutes",
+    "window_end_utc": "2026-08-03T12:05:00Z",
+    "yes_price": 0.52,
+    "no_price": 0.48
+  },
+  "oracle_gate": {
+    "passed": false,
+    "pyth_btc_usd": 0,
+    "chainlink_btc_usd": null,
+    "reason": "Example only: no live data supplied"
+  },
+  "exchange_prices": {
+    "bybit_btc_usdt": null,
+    "okx_btc_usdt": null
+  },
+  "news": [],
+  "position": {
+    "current_side": null,
+    "unrealized_pnl_usdc": 0
+  },
+  "risk": {
+    "trading_mode": "paper",
+    "live_trading_enabled": false
+  }
+}

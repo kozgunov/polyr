@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Polybot Control Center</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/paper.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">P</span><div><strong>Polybot</strong><small>CONTROL CENTER · LOCAL</small></div></div>
+    <div class="top-status"><span id="healthDot" class="dot"></span><span id="healthText">Подключение…</span><span class="divider"></span><span id="clock">—</span></div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div><p class="eyebrow">СИСТЕМА НАБЛЮДЕНИЯ</p><h1>Вся картина проекта<br><span>в одном локальном окне.</span></h1><p id="eventTitle" class="hero-copy">Ожидаю данные collector-а…</p></div>
+      <div class="hero-control"><div class="hero-state"><span>Режим</span><strong id="heroMode">PAPER</strong><small id="heroState">демо-торговля</small></div><button id="modeToggle" class="mode-toggle">Запросить REAL</button><div id="liveReadiness" class="live-readiness warn">Желательные условия LIVE проверяются…</div><div class="live-scale-control"><label for="liveScale">Коэффициент live <strong id="liveScaleValue">0.10×</strong></label><input id="liveScale" type="range" min="0.05" max="10" step="0.05" value="0.10"><small id="liveScaleHint">Бюджет $30 · max позиция $1</small><button id="applyLiveScale" class="control-btn">Сохранить коэффициент</button></div><small class="mode-note">Ручная кнопка переключает сразу без позиции или после завершения текущего события. Цвет — рекомендация, не блокировка.</small></div>
+    </section>
+
+    <nav class="section-nav">
+      <a href="#collection">Сбор</a><a href="#paper">Демо-торговля</a><a href="#market">Рынок</a><a href="#latency">Задержки</a><a href="#model">Модель</a><a href="#system">Ресурсы</a><a href="#economics">Экономика</a><a href="#access">Доступы</a><a href="#database">База</a>
+      <button id="refreshNow" class="nav-action">Обновить</button><button id="exportNow" class="nav-action">Экспорт CSV</button>
+    </nav>
+
+    <section id="collection" class="panel-section">
+      <div class="section-heading"><div><p class="eyebrow">01 · PIPELINE</p><h2>Сбор данных</h2></div><span id="lastRefresh" class="muted">—</span></div>
+      <div class="kpi-grid">
+        <article class="kpi"><span>Статус запуска</span><strong id="runStatus">—</strong><small id="runSlug">—</small></article>
+        <article class="kpi"><span>Снимки стакана</span><strong id="bookCount">0</strong><small>нормализованные записи</small></article>
+        <article class="kpi"><span>Внешние цены</span><strong id="priceCount">0</strong><small>oracle + exchanges</small></article>
+        <article class="kpi"><span>Примеры для ML</span><strong id="trainingCount">0</strong><small>размеченные outcomes</small></article>
+      </div>
+    </section>
+
+    <section id="paper" class="panel-section">
+      <div class="section-heading"><div><p class="eyebrow">02 · PAPER TRADING</p><h2>Все действия демо-бота</h2></div><div class="trading-controls"><span id="paperStatus" class="pill">не запущен</span><button id="stopTrading" class="control-btn stop">Остановить</button><button id="resumeTrading" class="control-btn">Продолжить</button><button id="newPaperRun" class="control-btn primary">Новый demo · $300</button></div></div>
+      <div class="kpi-grid">
+        <article class="kpi"><span>Начальный бюджет</span><strong id="paperInitial">$300.00</strong><small>USDC · фиксирован для сессии</small></article>
+        <article class="kpi"><span>Текущий капитал</span><strong id="paperEquity">$300.00</strong><small id="paperCash">cash $300.00</small></article>
+        <article class="kpi"><span>Валидный PnL</span><strong id="paperPnl">$0.00</strong><small id="paperUnrealized">unrealized $0.00</small></article>
+        <article class="kpi"><span>Поставлено моделью</span><strong id="paperWagered">$0.00</strong><small id="paperResolved">0 завершённых событий</small></article>
+      </div>
+      <details class="panel" open><summary>Реальность исполнения · PAPER и LIVE отдельно</summary><div id="executionReality" class="performance-grid"></div></details>
+      <details class="panel" open><summary>Заявки и фактическое исполнение</summary><div id="orderAudit" class="activity-list"></div></details>
+      <div class="paper-columns">
+        <div><p class="eyebrow paper-title">ПОЗИЦИИ И РЕЗУЛЬТАТЫ</p><div id="paperPositions" class="activity-list"><p class="empty">Позиции ещё не открывались</p></div></div>
+        <div><p class="eyebrow paper-title">ЖУРНАЛ РЕШЕНИЙ</p><div id="paperActions" class="activity-list"><p class="empty">Демо-бот ещё не запущен</p></div></div>
+      </div>
+      <div class="metrics-heading"><p class="eyebrow metrics-title">ЭФФЕКТИВНОСТЬ МОДЕЛИ · NET ПОСЛЕ КОМИССИЙ</p><button id="toggleMetricHelp" class="control-btn">Что означают метрики?</button></div>
+      <div id="performanceMetrics" class="performance-grid"></div>
+      <div id="metricHelp" class="metric-help" hidden></div>
+      <details class="advanced-metrics"><summary>Расширенные метрики и статистическая значимость</summary><div id="advancedMetrics" class="performance-grid"></div></details>
+    </section>
+
+    <section id="trade-review" class="panel-section">
+      <div class="section-heading"><div><p class="eyebrow">TRADE REPLAY · DEMO + LIVE</p><h2>Разбор каждой сделки</h2><p class="muted">Точка входа, Price to Beat, выбранная сторона, цена контракта и PnL в моменте сохраняются для офлайн-просмотра.</p></div><div class="db-controls"><select id="tradeSelect" aria-label="Выберите сделку"></select><button id="loadTrade">Открыть график</button></div></div>
+      <div id="tradeMeta" class="trade-meta"></div>
+      <div class="trade-chart-wrap"><canvas id="tradeChart"></canvas><div id="tradeTooltip" class="chart-tooltip" hidden></div></div>
+      <div id="tradeLegend" class="legend"></div>
+    </section>
+
+    <section id="comparison" class="panel-section">
+      <div class="section-heading"><div><p class="eyebrow">MODEL LEADERBOARD</p><h2>Интерактивное сравнение моделей</h2><p class="muted">Paper-результаты и offline-качество не смешиваются: первая таблица измеряет деньги, вторая — прогноз направления.</p></div><select id="comparisonSort" class="comparison-sort"><option value="net_pnl_usdc">Сортировать: Net PnL</option><option value="profit_factor">Profit factor</option><option value="expectancy_usdc">Expectancy</option><option value="wilson_lower">Wilson lower</option><option value="trades">Число событий</option></select></div>
+      <div class="table-wrap"><table><thead><tr><th>Модель / бот</th><th>События</th><th>Up / Down</th><th>Win rate</th><th>Wilson 95%</th><th>Net PnL</th><th>PF</th><th>Expectancy</th><th>Max DD</th><th>Live ROC-AUC</th><th>Стат. вывод</th></tr></thead><tbody id="modelComparisonBody"></tbody></table></div>
+      <div class="section-heading comparison-subhead"><div><p class="eyebrow">CAPITAL CURVES · $300 START</p><h2>Капитал моделей по завершённым событиям</h2><p class="muted">Каждая линия независимо начинается с $300. Частичные закрытия одного события предварительно объединяются.</p></div></div>
+      <div class="equity-toolbar"><div id="equityModelToggles" class="equity-toggles"></div><label>Диапазон <select id="equityRange"><option value="0">Все</option><option value="20">20 событий</option><option value="50">50 событий</option><option value="100">100 событий</option></select></label><button id="equityReset" class="control-btn">Сбросить</button></div><div class="equity-chart-wrap"><canvas id="modelEquityChart"></canvas><div id="equityTooltip" class="chart-tooltip" hidden></div></div><div id="equityLegend" class="legend"></div>
+      <div class="section-heading comparison-subhead"><div><p class="eyebrow">OFFLINE · TEMPORAL HOLDOUT</p><h2>Качество прогнозов</h2></div><select id="offlineSort" class="comparison-sort"><option value="accuracy">Сортировать: Accuracy</option><option value="brier_asc">Brier (меньше лучше)</option><option value="net_pnl_usdc">Offline Net PnL</option><option value="events">Число событий</option><option value="coverage">Покрытие</option></select></div>
+      <div class="table-wrap"><table><thead><tr><th>Модель</th><th>События</th><th>Accuracy</th><th>ROC-AUC ↑</th><th>Brier ↓</th><th>Log loss ↓</th><th>Покрытие</th><th>Offline trades</th><th>Offline Net PnL</th><th>Ограничение</th></tr></thead><tbody id="offlineComparisonBody"></tbody></table></div>
+      <details open><summary>Контекст соседних событий · эксперимент 0 / 3 / 12</summary><div id="historyContextGrid" class="health-grid"></div></details>
+      <div class="section-heading comparison-subhead"><div><p class="eyebrow">SHADOW · DRIFT</p><h2>Турнир без капитала и здоровье моделей</h2><p class="muted">Shadow-решения оцениваются на тех же событиях, но не исполняются.</p></div></div>
+      <div id="modelHealthGrid" class="health-model-grid"></div>
+      <div class="table-wrap"><table><thead><tr><th>Shadow-модель</th><th>События</th><th>Сделки</th><th>Up / Down</th><th>Net PnL</th><th>Expectancy</th><th>Max DD</th><th>ROC-AUC</th><th>Brier</th></tr></thead><tbody id="shadowLeaderboardBody"></tbody></table></div>
+    </section>
+
+    <section id="market" class="two-col">
+      <article class="card chart-card"><div class="card-head"><div><p class="eyebrow">02 · BTC/USD</p><h2>Референсная цена</h2></div><span class="pill">15 минут</span></div><canvas id="priceChart"></canvas><div id="chartLegend" class="legend"></div></article>
+      <article class="card"><div class="card-head"><div><p class="eyebrow">PRICE TO BEAT</p><h2>Цель события</h2></div></div><div id="targetBody" class="detail-list"></div><div class="card-head"><div><p class="eyebrow">ИСТОЧНИКИ</p><h2>Свежесть данных</h2></div></div><div id="sourceRows" class="source-list"><p class="empty">Нет данных</p></div></article>
+    </section>
+
+    <section id="latency" class="panel-section">
+      <div class="section-heading"><div><p class="eyebrow">03 · HEALTH</p><h2>Задержка и надёжность</h2></div></div>
+      <div id="latencyGrid" class="latency-grid"><p class="empty">Метрики появятся после запуска нового collector-а.</p></div>
+    </section>
+
+    <section class="three-col">
+      <article id="model" class="card"><p class="eyebrow">04 · MODEL</p><h2>Модели входа и выхода</h2><label class="model-role-label" for="entryModelSelect">1 · Направление и вход</label><div class="model-switch"><select id="entryModelSelect" aria-label="Модель входа"></select><button id="applyEntryModel" class="control-btn primary">Выбрать вход</button></div><div class="model-flow-arrow">↓ проверка цены и исполнения</div><div id="actionValueArchitecture" class="value-architecture"><strong>2 · Action-value gate</strong><span>Загрузка состояния эксперимента…</span></div><div class="model-flow-arrow">↓ после открытия позиции</div><label class="model-role-label" for="exitModelSelect">3 · Удержание и ранний выход</label><div class="model-switch"><select id="exitModelSelect" aria-label="Модель выхода"></select><button id="applyExitModel" class="control-btn primary">Выбрать выход</button></div><small id="modelSwitchHint" class="model-hint">Выбор доступен всегда; применяется после сделки или максимум через 5 минут.</small><div id="modelBody" class="detail-list"></div><div id="offlineModelMetrics" class="offline-metrics"></div></article>
+      <article id="system" class="card"><p class="eyebrow">05 · SYSTEM</p><h2>Потребление</h2><div id="systemBody"></div></article>
+      <article class="card"><p class="eyebrow">07 · EXECUTION</p><h2>Ранний вход / выход</h2><div id="executionBody" class="detail-list"></div></article>
+    </section>
+
+    <section id="economics" class="two-col">
+      <article class="card"><p class="eyebrow">06 · ECONOMICS</p><h2>Доходы и расходы</h2><div id="economicsGrid" class="economics-grid"></div><p id="economicsStatus" class="note"></p></article>
+      <article class="card"><p class="eyebrow">RISK CONTROL</p><h2>Предохранители</h2><div id="riskBody" class="detail-list"></div></article>
+    </section>
+
+    <section id="access" class="panel-section">
+      <div class="section-heading"><div><p class="eyebrow">09 · ACCESS</p><h2>К чему есть доступ</h2></div></div>
+      <div id="accessGrid" class="access-grid"></div>
+    </section>
+
+    <section id="database" class="panel-section database-section">
+      <div class="section-heading"><div><p class="eyebrow">SQLITE · LOCAL</p><h2>Просмотр базы данных</h2><p id="databasePath" class="muted"></p></div><div class="db-controls"><select id="tableSelect"></select><button id="loadTable">Открыть таблицу</button></div></div>
+      <div class="table-wrap"><table><thead id="dbHead"></thead><tbody id="dbBody"><tr><td class="empty">Выберите таблицу</td></tr></tbody></table></div>
+    </section>
+    <details id="projectSummary" class="project-summary" open>
+      <summary>Краткий отчёт по проекту</summary>
+      <div id="projectSummaryBody" class="summary-grid"><p class="empty">Формирую сводку…</p></div>
+    </details>
+  </main>
+  <div id="toastArea" class="toast-area"></div>
+  <footer>Polybot Control Center · данные остаются на локальной машине</footer>
+  <script defer src="/static/app.js?v=15"></script>
+  <script defer src="/static/trade_v11.js?v=15"></script>
+  <script defer src="/static/experiment_ui.js?v=15"></script>
+</body>
+</html>

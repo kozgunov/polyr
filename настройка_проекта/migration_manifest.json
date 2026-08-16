@@ -1,0 +1,1780 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-08-14T12:14:59.442476+00:00",
+  "ready": false,
+  "project_root": "C:\\Users\\kozgu\\OneDrive\\Рабочий стол\\poly_project",
+  "missing": [],
+  "database": {
+    "path": "C:\\Users\\kozgu\\OneDrive\\Рабочий стол\\poly_project\\данные\\market_data.sqlite3",
+    "exists": true,
+    "quick_check": "ok",
+    "tables": 29,
+    "training_examples": 151715,
+    "resolved_events": 1699,
+    "bytes": 2690310144,
+    "sha256": "a1183c18baba76a90402d2cf00069a0ade8d9e7b64e35b2db26f30239b41fe52",
+    "wal_bytes": 6826872
+  },
+  "model_artifacts": [
+    {
+      "path": "модели\\candidates\\counterfactual_entry_value_v2_20260809T230730Z\\btc_5m_action_value.joblib",
+      "bytes": 511247,
+      "modified_at": "2026-08-09T23:09:59.218402+00:00"
+    },
+    {
+      "path": "модели\\candidates\\counterfactual_entry_value_v2_20260809T230730Z\\report.json",
+      "bytes": 1060,
+      "modified_at": "2026-08-09T23:09:59.221403+00:00"
+    },
+    {
+      "path": "модели\\candidates\\counterfactual_entry_value_v2_20260809T230730Z\\summary.json",
+      "bytes": 1543,
+      "modified_at": "2026-08-09T23:10:04.580406+00:00"
+    },
+    {
+      "path": "модели\\candidates\\counterfactual_entry_value_v2_20260809T231010Z\\btc_5m_action_value.joblib",
+      "bytes": 511247,
+      "modified_at": "2026-08-09T23:11:32.901130+00:00"
+    },
+    {
+      "path": "модели\\candidates\\counterfactual_entry_value_v2_20260809T231010Z\\report.json",
+      "bytes": 1060,
+      "modified_at": "2026-08-09T23:11:32.903407+00:00"
+    },
+    {
+      "path": "модели\\candidates\\counterfactual_entry_value_v2_20260809T231010Z\\summary.json",
+      "bytes": 1543,
+      "modified_at": "2026-08-09T23:11:33.527245+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235529Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188912,
+      "modified_at": "2026-08-09T23:56:26.930173+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235529Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 30013,
+      "modified_at": "2026-08-09T23:56:26.940431+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235529Z\\catboost\\metrics.json",
+      "bytes": 416,
+      "modified_at": "2026-08-09T23:56:26.942430+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235529Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 445585,
+      "modified_at": "2026-08-09T23:56:05.892824+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235529Z\\exit\\btc_5m_exit_value.joblib",
+      "bytes": 372755,
+      "modified_at": "2026-08-09T23:57:46.286912+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235529Z\\exit\\exit_model_report.json",
+      "bytes": 131,
+      "modified_at": "2026-08-09T23:57:46.288493+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235529Z\\pnl_value\\btc_5m_net_pnl.joblib",
+      "bytes": 507059,
+      "modified_at": "2026-08-09T23:57:36.736358+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235529Z\\pnl_value\\pnl_model_report.json",
+      "bytes": 807,
+      "modified_at": "2026-08-09T23:57:36.762516+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235529Z\\training_report.json",
+      "bytes": 2583,
+      "modified_at": "2026-08-09T23:57:57.585318+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235840Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188912,
+      "modified_at": "2026-08-09T23:59:25.691592+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235840Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 30013,
+      "modified_at": "2026-08-09T23:59:25.701405+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235840Z\\catboost\\metrics.json",
+      "bytes": 416,
+      "modified_at": "2026-08-09T23:59:25.704084+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235840Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 445585,
+      "modified_at": "2026-08-09T23:58:59.642888+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235840Z\\exit\\btc_5m_exit_value.joblib",
+      "bytes": 372755,
+      "modified_at": "2026-08-10T00:00:04.302415+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235840Z\\exit\\exit_model_report.json",
+      "bytes": 131,
+      "modified_at": "2026-08-10T00:00:04.302415+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235840Z\\pnl_value\\btc_5m_net_pnl.joblib",
+      "bytes": 507059,
+      "modified_at": "2026-08-09T23:59:54.493104+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235840Z\\pnl_value\\pnl_model_report.json",
+      "bytes": 807,
+      "modified_at": "2026-08-09T23:59:54.498136+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1065_20260809T235840Z\\training_report.json",
+      "bytes": 2583,
+      "modified_at": "2026-08-10T00:00:14.212990+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133324Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188904,
+      "modified_at": "2026-08-10T13:34:29.505339+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133324Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 32011,
+      "modified_at": "2026-08-10T13:34:29.513469+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133324Z\\catboost\\metrics.json",
+      "bytes": 418,
+      "modified_at": "2026-08-10T13:34:29.515478+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133324Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 447631,
+      "modified_at": "2026-08-10T13:34:10.629574+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133324Z\\exit\\btc_5m_exit_value.joblib",
+      "bytes": 572661,
+      "modified_at": "2026-08-10T13:37:43.299089+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133324Z\\exit\\exit_model_report.json",
+      "bytes": 2431,
+      "modified_at": "2026-08-10T13:37:43.300670+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133324Z\\pnl_value\\btc_5m_net_pnl.joblib",
+      "bytes": 1111709,
+      "modified_at": "2026-08-10T13:37:35.554274+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133324Z\\pnl_value\\pnl_model_report.json",
+      "bytes": 3042,
+      "modified_at": "2026-08-10T13:37:35.558328+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133324Z\\training_report.json",
+      "bytes": 7729,
+      "modified_at": "2026-08-10T13:37:53.269879+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133345Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188904,
+      "modified_at": "2026-08-10T13:34:48.091002+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133345Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 32011,
+      "modified_at": "2026-08-10T13:34:48.100005+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133345Z\\catboost\\metrics.json",
+      "bytes": 418,
+      "modified_at": "2026-08-10T13:34:48.100005+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133345Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 447631,
+      "modified_at": "2026-08-10T13:34:28.065332+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133345Z\\exit\\btc_5m_exit_value.joblib",
+      "bytes": 572661,
+      "modified_at": "2026-08-10T13:37:54.333248+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133345Z\\exit\\exit_model_report.json",
+      "bytes": 2431,
+      "modified_at": "2026-08-10T13:37:54.334255+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133345Z\\pnl_value\\btc_5m_net_pnl.joblib",
+      "bytes": 1111709,
+      "modified_at": "2026-08-10T13:37:47.929829+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133345Z\\pnl_value\\pnl_model_report.json",
+      "bytes": 3042,
+      "modified_at": "2026-08-10T13:37:47.931834+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1139_20260810T133345Z\\training_report.json",
+      "bytes": 7729,
+      "modified_at": "2026-08-10T13:38:03.381315+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1239_20260811T193824Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188880,
+      "modified_at": "2026-08-11T19:39:44.826435+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1239_20260811T193824Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 34711,
+      "modified_at": "2026-08-11T19:39:44.832770+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1239_20260811T193824Z\\catboost\\metrics.json",
+      "bytes": 417,
+      "modified_at": "2026-08-11T19:39:44.835432+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1239_20260811T193824Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 450443,
+      "modified_at": "2026-08-11T19:39:27.820380+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1239_20260811T193824Z\\exit\\btc_5m_exit_value.joblib",
+      "bytes": 572614,
+      "modified_at": "2026-08-11T19:42:07.466381+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1239_20260811T193824Z\\exit\\exit_model_report.json",
+      "bytes": 2418,
+      "modified_at": "2026-08-11T19:42:07.467382+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1239_20260811T193824Z\\pnl_value\\btc_5m_net_pnl.joblib",
+      "bytes": 1111901,
+      "modified_at": "2026-08-11T19:41:59.636391+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1239_20260811T193824Z\\pnl_value\\pnl_model_report.json",
+      "bytes": 3012,
+      "modified_at": "2026-08-11T19:41:59.638624+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1239_20260811T193824Z\\training_report.json",
+      "bytes": 7689,
+      "modified_at": "2026-08-11T19:42:18.261199+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1340_20260812T131511Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188728,
+      "modified_at": "2026-08-12T13:16:41.294647+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1340_20260812T131511Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 37440,
+      "modified_at": "2026-08-12T13:16:41.315447+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1340_20260812T131511Z\\catboost\\metrics.json",
+      "bytes": 415,
+      "modified_at": "2026-08-12T13:16:41.316956+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1340_20260812T131511Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 453204,
+      "modified_at": "2026-08-12T13:16:15.466901+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1340_20260812T131511Z\\exit\\btc_5m_exit_value.joblib",
+      "bytes": 1140607,
+      "modified_at": "2026-08-12T13:21:48.813737+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1340_20260812T131511Z\\exit\\exit_model_report.json",
+      "bytes": 3068,
+      "modified_at": "2026-08-12T13:21:48.813737+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1340_20260812T131511Z\\pnl_value\\btc_5m_net_pnl.joblib",
+      "bytes": 2084245,
+      "modified_at": "2026-08-12T13:21:34.196829+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1340_20260812T131511Z\\pnl_value\\pnl_model_report.json",
+      "bytes": 3498,
+      "modified_at": "2026-08-12T13:21:34.196829+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1340_20260812T131511Z\\training_report.json",
+      "bytes": 8882,
+      "modified_at": "2026-08-12T13:22:00.776781+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1441_20260813T125009Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188856,
+      "modified_at": "2026-08-13T12:51:35.337178+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1441_20260813T125009Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 40167,
+      "modified_at": "2026-08-13T12:51:35.344186+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1441_20260813T125009Z\\catboost\\metrics.json",
+      "bytes": 416,
+      "modified_at": "2026-08-13T12:51:35.357903+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1441_20260813T125009Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 456027,
+      "modified_at": "2026-08-13T12:51:11.930723+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1441_20260813T125009Z\\exit\\btc_5m_exit_value.joblib",
+      "bytes": 1141359,
+      "modified_at": "2026-08-13T12:57:30.821972+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1441_20260813T125009Z\\exit\\exit_model_report.json",
+      "bytes": 3102,
+      "modified_at": "2026-08-13T12:57:30.822884+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1441_20260813T125009Z\\pnl_value\\btc_5m_net_pnl.joblib",
+      "bytes": 2086757,
+      "modified_at": "2026-08-13T12:57:09.343934+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1441_20260813T125009Z\\pnl_value\\pnl_model_report.json",
+      "bytes": 3507,
+      "modified_at": "2026-08-13T12:57:09.346079+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1441_20260813T125009Z\\training_report.json",
+      "bytes": 8926,
+      "modified_at": "2026-08-13T12:57:42.777079+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1541_20260813T211037Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188752,
+      "modified_at": "2026-08-13T21:11:59.474300+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1541_20260813T211037Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 42867,
+      "modified_at": "2026-08-13T21:11:59.484122+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1541_20260813T211037Z\\catboost\\metrics.json",
+      "bytes": 415,
+      "modified_at": "2026-08-13T21:11:59.484122+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1541_20260813T211037Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 458647,
+      "modified_at": "2026-08-13T21:11:45.119274+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1541_20260813T211037Z\\exit\\btc_5m_exit_value.joblib",
+      "bytes": 1144112,
+      "modified_at": "2026-08-13T21:16:42.651919+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1541_20260813T211037Z\\exit\\exit_model_report.json",
+      "bytes": 2800,
+      "modified_at": "2026-08-13T21:16:42.654934+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1541_20260813T211037Z\\pnl_value\\btc_5m_net_pnl.joblib",
+      "bytes": 2087477,
+      "modified_at": "2026-08-13T21:16:28.296177+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1541_20260813T211037Z\\pnl_value\\pnl_model_report.json",
+      "bytes": 3507,
+      "modified_at": "2026-08-13T21:16:28.297846+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1541_20260813T211037Z\\training_report.json",
+      "bytes": 8625,
+      "modified_at": "2026-08-13T21:16:52.949840+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1641_20260814T072219Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188728,
+      "modified_at": "2026-08-14T07:23:17.586634+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1641_20260814T072219Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 45567,
+      "modified_at": "2026-08-14T07:23:17.596737+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1641_20260814T072219Z\\catboost\\metrics.json",
+      "bytes": 417,
+      "modified_at": "2026-08-14T07:23:17.597636+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1641_20260814T072219Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 461283,
+      "modified_at": "2026-08-14T07:23:01.790764+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1641_20260814T072219Z\\exit\\btc_5m_exit_value.joblib",
+      "bytes": 1144992,
+      "modified_at": "2026-08-14T07:28:51.864973+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1641_20260814T072219Z\\exit\\exit_model_report.json",
+      "bytes": 2830,
+      "modified_at": "2026-08-14T07:28:51.865957+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1641_20260814T072219Z\\pnl_value\\btc_5m_net_pnl.joblib",
+      "bytes": 2085277,
+      "modified_at": "2026-08-14T07:28:33.560251+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1641_20260814T072219Z\\pnl_value\\pnl_model_report.json",
+      "bytes": 3533,
+      "modified_at": "2026-08-14T07:28:33.562110+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_1641_20260814T072219Z\\training_report.json",
+      "bytes": 8668,
+      "modified_at": "2026-08-14T07:29:03.572653+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_462_20260805T132239Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188760,
+      "modified_at": "2026-08-05T13:22:54.792416+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_462_20260805T132239Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 13730,
+      "modified_at": "2026-08-05T13:22:54.797443+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_462_20260805T132239Z\\catboost\\metrics.json",
+      "bytes": 409,
+      "modified_at": "2026-08-05T13:22:54.799470+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_462_20260805T132239Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 428630,
+      "modified_at": "2026-08-05T13:22:47.405337+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_462_20260805T132239Z\\training_report.json",
+      "bytes": 1227,
+      "modified_at": "2026-08-05T13:22:58.809455+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_463_20260805T133511Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188760,
+      "modified_at": "2026-08-05T13:35:30.090260+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_463_20260805T133511Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 13757,
+      "modified_at": "2026-08-05T13:35:30.095282+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_463_20260805T133511Z\\catboost\\metrics.json",
+      "bytes": 412,
+      "modified_at": "2026-08-05T13:35:30.097259+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_463_20260805T133511Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 428657,
+      "modified_at": "2026-08-05T13:35:20.658607+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_463_20260805T133511Z\\training_report.json",
+      "bytes": 1291,
+      "modified_at": "2026-08-05T13:35:34.719453+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_564_20260805T215409Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188808,
+      "modified_at": "2026-08-05T21:54:28.033768+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_564_20260805T215409Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 16484,
+      "modified_at": "2026-08-05T21:54:28.038076+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_564_20260805T215409Z\\catboost\\metrics.json",
+      "bytes": 415,
+      "modified_at": "2026-08-05T21:54:28.039081+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_564_20260805T215409Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 431672,
+      "modified_at": "2026-08-05T21:54:20.877800+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_564_20260805T215409Z\\training_report.json",
+      "bytes": 1300,
+      "modified_at": "2026-08-05T21:54:31.947241+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_664_20260806T140011Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188264,
+      "modified_at": "2026-08-06T14:00:30.384602+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_664_20260806T140011Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 19184,
+      "modified_at": "2026-08-06T14:00:30.388572+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_664_20260806T140011Z\\catboost\\metrics.json",
+      "bytes": 416,
+      "modified_at": "2026-08-06T14:00:30.390575+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_664_20260806T140011Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 434308,
+      "modified_at": "2026-08-06T14:00:22.312829+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_664_20260806T140011Z\\training_report.json",
+      "bytes": 1301,
+      "modified_at": "2026-08-06T14:00:35.053407+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_765_20260806T222519Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188744,
+      "modified_at": "2026-08-06T22:26:00.818726+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_765_20260806T222519Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 21913,
+      "modified_at": "2026-08-06T22:26:00.846598+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_765_20260806T222519Z\\catboost\\metrics.json",
+      "bytes": 413,
+      "modified_at": "2026-08-06T22:26:00.852954+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_765_20260806T222519Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 437069,
+      "modified_at": "2026-08-06T22:25:46.894968+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_765_20260806T222519Z\\training_report.json",
+      "bytes": 1297,
+      "modified_at": "2026-08-06T22:26:16.742863+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_865_20260808T225008Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188840,
+      "modified_at": "2026-08-08T22:50:32.099221+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_865_20260808T225008Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 24613,
+      "modified_at": "2026-08-08T22:50:32.105170+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_865_20260808T225008Z\\catboost\\metrics.json",
+      "bytes": 411,
+      "modified_at": "2026-08-08T22:50:32.108177+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_865_20260808T225008Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 439881,
+      "modified_at": "2026-08-08T22:50:21.979370+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_865_20260808T225008Z\\training_report.json",
+      "bytes": 1295,
+      "modified_at": "2026-08-08T22:50:38.695643+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_965_20260809T103848Z\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188784,
+      "modified_at": "2026-08-09T10:39:29.549648+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_965_20260809T103848Z\\catboost\\catboost_bundle.joblib",
+      "bytes": 27313,
+      "modified_at": "2026-08-09T10:39:29.549648+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_965_20260809T103848Z\\catboost\\metrics.json",
+      "bytes": 413,
+      "modified_at": "2026-08-09T10:39:29.549648+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_965_20260809T103848Z\\custom\\btc_5m_direction.joblib",
+      "bytes": 442725,
+      "modified_at": "2026-08-09T10:39:05.494884+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_965_20260809T103848Z\\exit\\btc_5m_exit_value.joblib",
+      "bytes": 372675,
+      "modified_at": "2026-08-09T10:39:34.559235+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_965_20260809T103848Z\\exit\\exit_model_report.json",
+      "bytes": 131,
+      "modified_at": "2026-08-09T10:39:34.559235+00:00"
+    },
+    {
+      "path": "модели\\candidates\\cycle_965_20260809T103848Z\\training_report.json",
+      "bytes": 1605,
+      "modified_at": "2026-08-09T10:39:40.690446+00:00"
+    },
+    {
+      "path": "модели\\candidates\\entry_value_v4_tail_risk\\btc_5m_net_pnl.joblib",
+      "bytes": 2083925,
+      "modified_at": "2026-08-12T10:39:40.280958+00:00"
+    },
+    {
+      "path": "модели\\candidates\\entry_value_v4_tail_risk\\experiment_report.json",
+      "bytes": 5392,
+      "modified_at": "2026-08-12T11:04:47.694567+00:00"
+    },
+    {
+      "path": "модели\\candidates\\entry_value_v4_tail_risk\\experiment_status.json",
+      "bytes": 308,
+      "modified_at": "2026-08-12T11:07:10.454551+00:00"
+    },
+    {
+      "path": "модели\\candidates\\entry_value_v5_regime_experts\\entry_value_v5_regime_experts.joblib",
+      "bytes": 479632,
+      "modified_at": "2026-08-12T14:04:33.487437+00:00"
+    },
+    {
+      "path": "модели\\candidates\\entry_value_v5_regime_experts\\partial_folds.json",
+      "bytes": 6524,
+      "modified_at": "2026-08-12T14:04:28.812550+00:00"
+    },
+    {
+      "path": "модели\\candidates\\entry_value_v5_regime_experts\\report.json",
+      "bytes": 8169,
+      "modified_at": "2026-08-12T14:04:33.487437+00:00"
+    },
+    {
+      "path": "модели\\candidates\\exit_sequence_v14_20260813T174950Z\\exit_sequence_report.json",
+      "bytes": 1814,
+      "modified_at": "2026-08-13T17:49:51.456494+00:00"
+    },
+    {
+      "path": "модели\\candidates\\exit_sequence_v14_20260813T174950Z\\exit_sequence_v14.joblib",
+      "bytes": 1263288,
+      "modified_at": "2026-08-13T17:49:51.456494+00:00"
+    },
+    {
+      "path": "модели\\candidates\\exit_sequence_v14_20260813T175309Z\\exit_sequence_report.json",
+      "bytes": 2029,
+      "modified_at": "2026-08-13T17:53:09.557138+00:00"
+    },
+    {
+      "path": "модели\\candidates\\exit_sequence_v14_20260813T175309Z\\exit_sequence_v14.joblib",
+      "bytes": 1263449,
+      "modified_at": "2026-08-13T17:53:09.554643+00:00"
+    },
+    {
+      "path": "модели\\candidates\\exit_two_stage_v3\\btc_5m_exit_value.joblib",
+      "bytes": 1142626,
+      "modified_at": "2026-08-10T13:40:22.903468+00:00"
+    },
+    {
+      "path": "модели\\candidates\\exit_two_stage_v3\\exit_model_report.json",
+      "bytes": 2978,
+      "modified_at": "2026-08-10T13:40:22.903468+00:00"
+    },
+    {
+      "path": "модели\\candidates\\exit_two_stage_v4\\btc_5m_exit_value.joblib",
+      "bytes": 1142685,
+      "modified_at": "2026-08-10T13:41:19.893179+00:00"
+    },
+    {
+      "path": "модели\\candidates\\exit_two_stage_v4\\exit_model_report.json",
+      "bytes": 3044,
+      "modified_at": "2026-08-10T13:41:19.894225+00:00"
+    },
+    {
+      "path": "модели\\candidates\\exit_value_v2_20260809T233152Z\\btc_5m_exit_value.joblib",
+      "bytes": 572694,
+      "modified_at": "2026-08-09T23:31:53.002339+00:00"
+    },
+    {
+      "path": "модели\\candidates\\exit_value_v2_20260809T233152Z\\exit_model_report.json",
+      "bytes": 2424,
+      "modified_at": "2026-08-09T23:31:53.004859+00:00"
+    },
+    {
+      "path": "модели\\candidates\\exit_value_v2_20260813T174520Z\\btc_5m_exit_value.joblib",
+      "bytes": 1143264,
+      "modified_at": "2026-08-13T17:45:21.123002+00:00"
+    },
+    {
+      "path": "модели\\candidates\\exit_value_v2_20260813T174520Z\\exit_model_report.json",
+      "bytes": 3129,
+      "modified_at": "2026-08-13T17:45:21.125918+00:00"
+    },
+    {
+      "path": "модели\\candidates\\history_context_v1\\candidate_training_report.json",
+      "bytes": 2569,
+      "modified_at": "2026-08-14T12:04:15.554610+00:00"
+    },
+    {
+      "path": "модели\\candidates\\history_context_v1\\history_0\\direction_model.joblib",
+      "bytes": 462782,
+      "modified_at": "2026-08-14T12:03:36.879790+00:00"
+    },
+    {
+      "path": "модели\\candidates\\history_context_v1\\history_12\\direction_model.joblib",
+      "bytes": 476449,
+      "modified_at": "2026-08-14T12:04:15.487962+00:00"
+    },
+    {
+      "path": "модели\\candidates\\history_context_v1\\history_3\\direction_model.joblib",
+      "bytes": 476054,
+      "modified_at": "2026-08-14T12:03:59.733729+00:00"
+    },
+    {
+      "path": "модели\\candidates\\two_stage_value_v3\\pnl_model.joblib",
+      "bytes": 1110587,
+      "modified_at": "2026-08-09T23:40:48.630234+00:00"
+    },
+    {
+      "path": "модели\\candidates\\two_stage_value_v3\\pnl_model_report.json",
+      "bytes": 2810,
+      "modified_at": "2026-08-09T23:40:48.635232+00:00"
+    },
+    {
+      "path": "модели\\candidates\\two_stage_value_v3_1_return_normalized\\pnl_model.joblib",
+      "bytes": 1111232,
+      "modified_at": "2026-08-09T23:44:47.096135+00:00"
+    },
+    {
+      "path": "модели\\candidates\\two_stage_value_v3_1_return_normalized\\pnl_model_report.json",
+      "bytes": 2914,
+      "modified_at": "2026-08-09T23:44:47.098136+00:00"
+    },
+    {
+      "path": "модели\\candidates\\two_stage_value_v3_2_structural_pnl\\pnl_model.joblib",
+      "bytes": 1111741,
+      "modified_at": "2026-08-09T23:48:29.484051+00:00"
+    },
+    {
+      "path": "модели\\candidates\\two_stage_value_v3_2_structural_pnl\\pnl_model_report.json",
+      "bytes": 2992,
+      "modified_at": "2026-08-09T23:48:29.486420+00:00"
+    },
+    {
+      "path": "модели\\catboost\\catboost_btc_5m.cbm",
+      "bytes": 188824,
+      "modified_at": "2026-08-08T18:23:10.543349+00:00"
+    },
+    {
+      "path": "модели\\catboost\\catboost_bundle.joblib",
+      "bytes": 24316,
+      "modified_at": "2026-08-08T18:23:10.609600+00:00"
+    },
+    {
+      "path": "модели\\catboost\\metrics.json",
+      "bytes": 412,
+      "modified_at": "2026-08-08T18:23:10.631031+00:00"
+    },
+    {
+      "path": "модели\\catboost\\model.json",
+      "bytes": 110,
+      "modified_at": "2026-08-03T20:03:54.189053+00:00"
+    },
+    {
+      "path": "модели\\checkpoints\\catboost\\2026-08-05_pre_cycle463\\catboost_btc_5m.cbm",
+      "bytes": 188584,
+      "modified_at": "2026-08-04T07:52:21.090620+00:00"
+    },
+    {
+      "path": "модели\\checkpoints\\catboost\\2026-08-05_pre_cycle463\\catboost_bundle.joblib",
+      "bytes": 5715,
+      "modified_at": "2026-08-04T07:52:21.093869+00:00"
+    },
+    {
+      "path": "модели\\checkpoints\\catboost\\2026-08-05_pre_cycle463\\metrics.json",
+      "bytes": 333,
+      "modified_at": "2026-08-04T07:52:21.093869+00:00"
+    },
+    {
+      "path": "модели\\checkpoints\\qwen\\2026-08-05_v6_qwen_66plus_positive_checkpoint\\config_snapshot.json",
+      "bytes": 830,
+      "modified_at": "2026-08-05T13:17:19.901558+00:00"
+    },
+    {
+      "path": "модели\\checkpoints\\qwen\\2026-08-05_v6_qwen_66plus_positive_checkpoint\\equity_curve.json",
+      "bytes": 10609,
+      "modified_at": "2026-08-05T13:17:19.900556+00:00"
+    },
+    {
+      "path": "модели\\checkpoints\\qwen\\2026-08-05_v6_qwen_66plus_positive_checkpoint\\metrics.json",
+      "bytes": 1676,
+      "modified_at": "2026-08-05T13:17:19.899556+00:00"
+    },
+    {
+      "path": "модели\\checkpoints\\qwen\\2026-08-05_v6_qwen_66plus_positive_checkpoint\\model_metadata\\model.json",
+      "bytes": 222,
+      "modified_at": "2026-08-03T23:41:26.574604+00:00"
+    },
+    {
+      "path": "модели\\checkpoints\\qwen\\2026-08-05_v6_qwen_66plus_positive_checkpoint\\model_metadata\\weights\\config.json",
+      "bytes": 660,
+      "modified_at": "2026-08-03T23:23:02.953777+00:00"
+    },
+    {
+      "path": "модели\\checkpoints\\qwen\\2026-08-05_v6_qwen_66plus_positive_checkpoint\\model_metadata\\weights\\generation_config.json",
+      "bytes": 242,
+      "modified_at": "2026-08-03T23:23:03.077791+00:00"
+    },
+    {
+      "path": "модели\\checkpoints\\qwen\\2026-08-05_v6_qwen_66plus_positive_checkpoint\\model_metadata\\weights\\tokenizer_config.json",
+      "bytes": 7305,
+      "modified_at": "2026-08-03T23:23:02.923557+00:00"
+    },
+    {
+      "path": "модели\\checkpoints\\qwen\\2026-08-05_v6_qwen_66plus_positive_checkpoint\\weights_manifest.json",
+      "bytes": 3827,
+      "modified_at": "2026-08-05T13:17:19.901558+00:00"
+    },
+    {
+      "path": "модели\\entry_value_v4_tail_risk_report.json",
+      "bytes": 3414,
+      "modified_at": "2026-08-12T10:39:40.288150+00:00"
+    },
+    {
+      "path": "модели\\exit_partial_full_hold_comparison_v14.json",
+      "bytes": 115619,
+      "modified_at": "2026-08-13T17:42:25.647842+00:00"
+    },
+    {
+      "path": "модели\\exit_shadow_tournament_v14.json",
+      "bytes": 509,
+      "modified_at": "2026-08-14T11:34:23.028031+00:00"
+    },
+    {
+      "path": "модели\\gemma-3-1b\\model.json",
+      "bytes": 222,
+      "modified_at": "2026-08-03T23:41:30.080909+00:00"
+    },
+    {
+      "path": "модели\\gemma-3-1b\\weights\\.cache\\huggingface\\trees\\dcc83ea841ab6100d6b47a070329e1ba4cf78752.json",
+      "bytes": 1717,
+      "modified_at": "2026-08-04T07:52:21.929306+00:00"
+    },
+    {
+      "path": "модели\\gemma-3-1b\\weights\\added_tokens.json",
+      "bytes": 35,
+      "modified_at": "2026-08-04T07:52:22.424059+00:00"
+    },
+    {
+      "path": "модели\\gemma-3-1b\\weights\\config.json",
+      "bytes": 899,
+      "modified_at": "2026-08-04T07:52:22.315365+00:00"
+    },
+    {
+      "path": "модели\\gemma-3-1b\\weights\\generation_config.json",
+      "bytes": 215,
+      "modified_at": "2026-08-04T07:52:22.426545+00:00"
+    },
+    {
+      "path": "модели\\gemma-3-1b\\weights\\special_tokens_map.json",
+      "bytes": 662,
+      "modified_at": "2026-08-04T07:52:22.426545+00:00"
+    },
+    {
+      "path": "модели\\gemma-3-1b\\weights\\tokenizer.json",
+      "bytes": 33384568,
+      "modified_at": "2026-08-04T07:52:25.215173+00:00"
+    },
+    {
+      "path": "модели\\gemma-3-1b\\weights\\tokenizer_config.json",
+      "bytes": 1156999,
+      "modified_at": "2026-08-04T07:52:22.527848+00:00"
+    },
+    {
+      "path": "модели\\history_context_walk_forward.json",
+      "bytes": 5474,
+      "modified_at": "2026-08-14T12:02:34.297523+00:00"
+    },
+    {
+      "path": "модели\\installation_report.json",
+      "bytes": 1595,
+      "modified_at": "2026-08-08T18:23:10.706421+00:00"
+    },
+    {
+      "path": "модели\\loss_reversal_hypothesis.json",
+      "bytes": 1084,
+      "modified_at": "2026-08-14T11:54:40.817855+00:00"
+    },
+    {
+      "path": "модели\\offline_comparison.json",
+      "bytes": 7577,
+      "modified_at": "2026-08-09T11:35:39.452794+00:00"
+    },
+    {
+      "path": "модели\\paper_live_execution_gap_v14.json",
+      "bytes": 1721,
+      "modified_at": "2026-08-13T17:53:58.644650+00:00"
+    },
+    {
+      "path": "модели\\pnl_model_report.json",
+      "bytes": 2810,
+      "modified_at": "2026-08-09T23:40:48.635232+00:00"
+    },
+    {
+      "path": "модели\\qwen2.5-1.5b-instruct\\model.json",
+      "bytes": 222,
+      "modified_at": "2026-08-03T23:41:26.574604+00:00"
+    },
+    {
+      "path": "модели\\qwen2.5-1.5b-instruct\\weights\\.cache\\huggingface\\trees\\989aa7980e4cf806f80c7fef2b1adb7bc71aa306.json",
+      "bytes": 1300,
+      "modified_at": "2026-08-03T23:23:02.382525+00:00"
+    },
+    {
+      "path": "модели\\qwen2.5-1.5b-instruct\\weights\\config.json",
+      "bytes": 660,
+      "modified_at": "2026-08-03T23:23:02.953777+00:00"
+    },
+    {
+      "path": "модели\\qwen2.5-1.5b-instruct\\weights\\generation_config.json",
+      "bytes": 242,
+      "modified_at": "2026-08-03T23:23:03.077791+00:00"
+    },
+    {
+      "path": "модели\\qwen2.5-1.5b-instruct\\weights\\tokenizer.json",
+      "bytes": 7031645,
+      "modified_at": "2026-08-03T23:23:03.039584+00:00"
+    },
+    {
+      "path": "модели\\qwen2.5-1.5b-instruct\\weights\\tokenizer_config.json",
+      "bytes": 7305,
+      "modified_at": "2026-08-03T23:23:02.923557+00:00"
+    },
+    {
+      "path": "модели\\qwen2.5-1.5b-instruct\\weights\\vocab.json",
+      "bytes": 2776833,
+      "modified_at": "2026-08-03T23:23:02.817091+00:00"
+    },
+    {
+      "path": "модели\\qwen_inverted_v1_report.json",
+      "bytes": 740,
+      "modified_at": "2026-08-10T08:56:14.045688+00:00"
+    },
+    {
+      "path": "модели\\qwen_qlora_experiment_v1\\experiment.json",
+      "bytes": 1113,
+      "modified_at": "2026-08-05T14:00:29.396448+00:00"
+    },
+    {
+      "path": "модели\\shadow\\exit_sequence_v14.joblib",
+      "bytes": 1263449,
+      "modified_at": "2026-08-13T17:53:09.554643+00:00"
+    },
+    {
+      "path": "модели\\shadow\\exit_sequence_v14_report.json",
+      "bytes": 2029,
+      "modified_at": "2026-08-13T17:53:09.557138+00:00"
+    },
+    {
+      "path": "модели\\shadow\\exit_v14_candidate.joblib",
+      "bytes": 1143264,
+      "modified_at": "2026-08-13T17:45:21.123002+00:00"
+    },
+    {
+      "path": "модели\\shadow\\exit_v14_candidate_report.json",
+      "bytes": 3129,
+      "modified_at": "2026-08-13T17:45:21.125918+00:00"
+    },
+    {
+      "path": "модели\\target_backfill_report.json",
+      "bytes": 160,
+      "modified_at": "2026-08-04T00:30:41.023852+00:00"
+    },
+    {
+      "path": "модели\\trading_threshold_sweep.json",
+      "bytes": 2568,
+      "modified_at": "2026-08-04T08:26:58.005525+00:00"
+    },
+    {
+      "path": "модели\\walk_forward_report.json",
+      "bytes": 1559,
+      "modified_at": "2026-08-04T00:40:09.370080+00:00"
+    },
+    {
+      "path": "модели\\walk_forward_v8_report.json",
+      "bytes": 10815,
+      "modified_at": "2026-08-06T07:34:25.314335+00:00"
+    },
+    {
+      "path": "модели\\walk_forward_v9_full_chain_report.json",
+      "bytes": 4545,
+      "modified_at": "2026-08-12T11:04:47.205490+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\action_value\\before_v12_paper_experiment\\btc_5m_net_pnl.joblib",
+      "bytes": 503175,
+      "modified_at": "2026-08-06T07:12:39.744345+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\action_value\\before_v12_paper_experiment\\pnl_model_report.json",
+      "bytes": 784,
+      "modified_at": "2026-08-06T07:12:39.745347+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\catboost_v_2026-08-06T11-12-09_782ed003\\artifacts\\catboost_btc_5m.cbm",
+      "bytes": 188824,
+      "modified_at": "2026-08-08T18:23:10.543349+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\catboost_v_2026-08-06T11-12-09_782ed003\\artifacts\\catboost_bundle.joblib",
+      "bytes": 24316,
+      "modified_at": "2026-08-08T18:23:10.609600+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\catboost_v_2026-08-06T11-12-09_782ed003\\results.json",
+      "bytes": 856,
+      "modified_at": "2026-08-08T22:02:13.396743+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0001\\catboost_btc_5m.cbm",
+      "bytes": 188784,
+      "modified_at": "2026-08-09T10:39:29.549648+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0001\\catboost_bundle.joblib",
+      "bytes": 27313,
+      "modified_at": "2026-08-09T10:39:29.549648+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0001\\metrics.json",
+      "bytes": 413,
+      "modified_at": "2026-08-09T10:39:29.549648+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0001\\version.json",
+      "bytes": 1141,
+      "modified_at": "2026-08-09T10:39:29.692959+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0002\\catboost_btc_5m.cbm",
+      "bytes": 188912,
+      "modified_at": "2026-08-09T23:56:26.930173+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0002\\catboost_bundle.joblib",
+      "bytes": 30013,
+      "modified_at": "2026-08-09T23:56:26.940431+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0002\\metrics.json",
+      "bytes": 416,
+      "modified_at": "2026-08-09T23:56:26.942430+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0002\\version.json",
+      "bytes": 1144,
+      "modified_at": "2026-08-09T23:56:27.019855+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0003\\catboost_btc_5m.cbm",
+      "bytes": 188912,
+      "modified_at": "2026-08-09T23:59:25.691592+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0003\\catboost_bundle.joblib",
+      "bytes": 30013,
+      "modified_at": "2026-08-09T23:59:25.701405+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0003\\metrics.json",
+      "bytes": 416,
+      "modified_at": "2026-08-09T23:59:25.704084+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0003\\version.json",
+      "bytes": 1144,
+      "modified_at": "2026-08-09T23:59:25.817779+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0004\\catboost_btc_5m.cbm",
+      "bytes": 188904,
+      "modified_at": "2026-08-10T13:34:29.505339+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0004\\catboost_bundle.joblib",
+      "bytes": 32011,
+      "modified_at": "2026-08-10T13:34:29.513469+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0004\\metrics.json",
+      "bytes": 418,
+      "modified_at": "2026-08-10T13:34:29.515478+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0004\\version.json",
+      "bytes": 1146,
+      "modified_at": "2026-08-10T13:34:29.573715+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0005\\catboost_btc_5m.cbm",
+      "bytes": 188904,
+      "modified_at": "2026-08-10T13:34:48.091002+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0005\\catboost_bundle.joblib",
+      "bytes": 32011,
+      "modified_at": "2026-08-10T13:34:48.100005+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0005\\metrics.json",
+      "bytes": 418,
+      "modified_at": "2026-08-10T13:34:48.100005+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0005\\version.json",
+      "bytes": 1146,
+      "modified_at": "2026-08-10T13:34:48.144368+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0006\\catboost_btc_5m.cbm",
+      "bytes": 188880,
+      "modified_at": "2026-08-11T19:39:44.826435+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0006\\catboost_bundle.joblib",
+      "bytes": 34711,
+      "modified_at": "2026-08-11T19:39:44.832770+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0006\\metrics.json",
+      "bytes": 417,
+      "modified_at": "2026-08-11T19:39:44.835432+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0006\\version.json",
+      "bytes": 1145,
+      "modified_at": "2026-08-11T19:39:44.877271+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0007\\catboost_btc_5m.cbm",
+      "bytes": 188728,
+      "modified_at": "2026-08-12T13:16:41.294647+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0007\\catboost_bundle.joblib",
+      "bytes": 37440,
+      "modified_at": "2026-08-12T13:16:41.315447+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0007\\metrics.json",
+      "bytes": 415,
+      "modified_at": "2026-08-12T13:16:41.316956+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0007\\version.json",
+      "bytes": 1143,
+      "modified_at": "2026-08-12T13:16:41.403877+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0008\\catboost_btc_5m.cbm",
+      "bytes": 188856,
+      "modified_at": "2026-08-13T12:51:35.337178+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0008\\catboost_bundle.joblib",
+      "bytes": 40167,
+      "modified_at": "2026-08-13T12:51:35.344186+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0008\\metrics.json",
+      "bytes": 416,
+      "modified_at": "2026-08-13T12:51:35.357903+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0008\\version.json",
+      "bytes": 1144,
+      "modified_at": "2026-08-13T12:51:35.446686+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0009\\catboost_btc_5m.cbm",
+      "bytes": 188752,
+      "modified_at": "2026-08-13T21:11:59.474300+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0009\\catboost_bundle.joblib",
+      "bytes": 42867,
+      "modified_at": "2026-08-13T21:11:59.484122+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0009\\metrics.json",
+      "bytes": 415,
+      "modified_at": "2026-08-13T21:11:59.484122+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0009\\version.json",
+      "bytes": 1143,
+      "modified_at": "2026-08-13T21:11:59.585527+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0010\\catboost_btc_5m.cbm",
+      "bytes": 188728,
+      "modified_at": "2026-08-14T07:23:17.586634+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0010\\catboost_bundle.joblib",
+      "bytes": 45567,
+      "modified_at": "2026-08-14T07:23:17.596737+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0010\\metrics.json",
+      "bytes": 417,
+      "modified_at": "2026-08-14T07:23:17.597636+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\catboost\\entry\\catboost_entry_v0010\\version.json",
+      "bytes": 1145,
+      "modified_at": "2026-08-14T07:23:17.768749+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\custom_v_2026-08-03T23-38-58_c41793f2\\artifacts\\btc_5m_direction.joblib",
+      "bytes": 439616,
+      "modified_at": "2026-08-08T18:22:47.930113+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\custom_v_2026-08-03T23-38-58_c41793f2\\results.json",
+      "bytes": 657,
+      "modified_at": "2026-08-08T22:02:13.319480+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\custom_v_2026-08-04T00-19-23_f1f9838c\\artifacts\\btc_5m_direction.joblib",
+      "bytes": 439616,
+      "modified_at": "2026-08-08T18:22:47.930113+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\custom_v_2026-08-04T00-19-23_f1f9838c\\results.json",
+      "bytes": 665,
+      "modified_at": "2026-08-08T22:02:13.332479+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\custom_v_2026-08-04T21-04-58_a3e1bbaa\\artifacts\\btc_5m_direction.joblib",
+      "bytes": 439616,
+      "modified_at": "2026-08-08T18:22:47.930113+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\custom_v_2026-08-04T21-04-58_a3e1bbaa\\results.json",
+      "bytes": 682,
+      "modified_at": "2026-08-08T22:02:13.360931+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\custom_v_2026-08-12T15-55-52_7df88f95\\artifacts\\btc_5m_direction.joblib",
+      "bytes": 439616,
+      "modified_at": "2026-08-08T18:22:47.930113+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\custom_v_2026-08-12T15-55-52_7df88f95\\results.json",
+      "bytes": 680,
+      "modified_at": "2026-08-13T08:33:42.670338+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\custom_v_2026-08-13T08-33-42_f9f60daf\\artifacts\\btc_5m_direction.joblib",
+      "bytes": 439616,
+      "modified_at": "2026-08-08T18:22:47.930113+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\custom_v_2026-08-13T08-33-42_f9f60daf\\results.json",
+      "bytes": 671,
+      "modified_at": "2026-08-13T18:30:12.481764+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0001\\btc_5m_direction.joblib",
+      "bytes": 442725,
+      "modified_at": "2026-08-09T10:39:05.494884+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0001\\version.json",
+      "bytes": 830,
+      "modified_at": "2026-08-09T10:39:05.514941+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0002\\btc_5m_direction.joblib",
+      "bytes": 445585,
+      "modified_at": "2026-08-09T23:56:05.892824+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0002\\version.json",
+      "bytes": 828,
+      "modified_at": "2026-08-09T23:56:05.939651+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0003\\btc_5m_direction.joblib",
+      "bytes": 445585,
+      "modified_at": "2026-08-09T23:58:59.642888+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0003\\version.json",
+      "bytes": 828,
+      "modified_at": "2026-08-09T23:58:59.668731+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0004\\btc_5m_direction.joblib",
+      "bytes": 447631,
+      "modified_at": "2026-08-10T13:34:10.629574+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0004\\version.json",
+      "bytes": 831,
+      "modified_at": "2026-08-10T13:34:10.663591+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0005\\btc_5m_direction.joblib",
+      "bytes": 447631,
+      "modified_at": "2026-08-10T13:34:28.065332+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0005\\version.json",
+      "bytes": 831,
+      "modified_at": "2026-08-10T13:34:28.093022+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0006\\btc_5m_direction.joblib",
+      "bytes": 450443,
+      "modified_at": "2026-08-11T19:39:27.820380+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0006\\version.json",
+      "bytes": 832,
+      "modified_at": "2026-08-11T19:39:27.844101+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0007\\btc_5m_direction.joblib",
+      "bytes": 453204,
+      "modified_at": "2026-08-12T13:16:15.466901+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0007\\version.json",
+      "bytes": 831,
+      "modified_at": "2026-08-12T13:16:15.490606+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0008\\btc_5m_direction.joblib",
+      "bytes": 456027,
+      "modified_at": "2026-08-13T12:51:11.930723+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0008\\version.json",
+      "bytes": 831,
+      "modified_at": "2026-08-13T12:51:11.964036+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0009\\btc_5m_direction.joblib",
+      "bytes": 458647,
+      "modified_at": "2026-08-13T21:11:45.119274+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0009\\version.json",
+      "bytes": 832,
+      "modified_at": "2026-08-13T21:11:45.144945+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0010\\btc_5m_direction.joblib",
+      "bytes": 461283,
+      "modified_at": "2026-08-14T07:23:01.790764+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0010\\version.json",
+      "bytes": 817,
+      "modified_at": "2026-08-14T07:23:01.815887+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0011\\direction_model.joblib",
+      "bytes": 462782,
+      "modified_at": "2026-08-14T12:03:36.879790+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0011\\version.json",
+      "bytes": 833,
+      "modified_at": "2026-08-14T12:03:36.912952+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0012\\direction_model.joblib",
+      "bytes": 476054,
+      "modified_at": "2026-08-14T12:03:59.733729+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0012\\version.json",
+      "bytes": 834,
+      "modified_at": "2026-08-14T12:03:59.751907+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0013\\direction_model.joblib",
+      "bytes": 476449,
+      "modified_at": "2026-08-14T12:04:15.487962+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\custom\\entry\\custom_entry_v0013\\version.json",
+      "bytes": 834,
+      "modified_at": "2026-08-14T12:04:15.511269+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_sequence\\exit\\exit_sequence_exit_v0001\\exit_sequence_report.json",
+      "bytes": 1814,
+      "modified_at": "2026-08-13T17:49:51.456494+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_sequence\\exit\\exit_sequence_exit_v0001\\exit_sequence_v14.joblib",
+      "bytes": 1263288,
+      "modified_at": "2026-08-13T17:49:51.456494+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_sequence\\exit\\exit_sequence_exit_v0001\\version.json",
+      "bytes": 2524,
+      "modified_at": "2026-08-13T17:49:51.519827+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_sequence\\exit\\exit_sequence_exit_v0002\\exit_sequence_report.json",
+      "bytes": 2029,
+      "modified_at": "2026-08-13T17:53:09.557138+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_sequence\\exit\\exit_sequence_exit_v0002\\exit_sequence_v14.joblib",
+      "bytes": 1263449,
+      "modified_at": "2026-08-13T17:53:09.554643+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_sequence\\exit\\exit_sequence_exit_v0002\\version.json",
+      "bytes": 2753,
+      "modified_at": "2026-08-13T17:53:09.640028+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0001\\btc_5m_exit_value.joblib",
+      "bytes": 372675,
+      "modified_at": "2026-08-09T10:39:34.559235+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0001\\exit_model_report.json",
+      "bytes": 131,
+      "modified_at": "2026-08-09T10:39:34.559235+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0001\\version.json",
+      "bytes": 698,
+      "modified_at": "2026-08-09T10:39:34.588663+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0002\\btc_5m_exit_value.joblib",
+      "bytes": 572694,
+      "modified_at": "2026-08-09T23:31:53.002339+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0002\\exit_model_report.json",
+      "bytes": 2424,
+      "modified_at": "2026-08-09T23:31:53.004859+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0002\\version.json",
+      "bytes": 3136,
+      "modified_at": "2026-08-09T23:31:53.082486+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0003\\btc_5m_exit_value.joblib",
+      "bytes": 372755,
+      "modified_at": "2026-08-09T23:57:46.286912+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0003\\exit_model_report.json",
+      "bytes": 131,
+      "modified_at": "2026-08-09T23:57:46.288493+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0003\\version.json",
+      "bytes": 698,
+      "modified_at": "2026-08-09T23:57:46.338777+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0004\\btc_5m_exit_value.joblib",
+      "bytes": 372755,
+      "modified_at": "2026-08-10T00:00:04.302415+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0004\\exit_model_report.json",
+      "bytes": 131,
+      "modified_at": "2026-08-10T00:00:04.302415+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0004\\version.json",
+      "bytes": 698,
+      "modified_at": "2026-08-10T00:00:04.381144+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0005\\btc_5m_exit_value.joblib",
+      "bytes": 572661,
+      "modified_at": "2026-08-10T13:37:43.299089+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0005\\exit_model_report.json",
+      "bytes": 2431,
+      "modified_at": "2026-08-10T13:37:43.300670+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0005\\version.json",
+      "bytes": 3143,
+      "modified_at": "2026-08-10T13:37:43.417084+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0006\\btc_5m_exit_value.joblib",
+      "bytes": 572661,
+      "modified_at": "2026-08-10T13:37:54.333248+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0006\\exit_model_report.json",
+      "bytes": 2431,
+      "modified_at": "2026-08-10T13:37:54.334255+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0006\\version.json",
+      "bytes": 3143,
+      "modified_at": "2026-08-10T13:37:54.374470+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0007\\btc_5m_exit_value.joblib",
+      "bytes": 1142626,
+      "modified_at": "2026-08-10T13:40:22.903468+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0007\\exit_model_report.json",
+      "bytes": 2978,
+      "modified_at": "2026-08-10T13:40:22.903468+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0007\\version.json",
+      "bytes": 3719,
+      "modified_at": "2026-08-10T13:40:22.948435+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0008\\btc_5m_exit_value.joblib",
+      "bytes": 1142685,
+      "modified_at": "2026-08-10T13:41:19.893179+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0008\\exit_model_report.json",
+      "bytes": 3044,
+      "modified_at": "2026-08-10T13:41:19.894225+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0008\\version.json",
+      "bytes": 3789,
+      "modified_at": "2026-08-10T13:41:19.925561+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0009\\btc_5m_exit_value.joblib",
+      "bytes": 572614,
+      "modified_at": "2026-08-11T19:42:07.466381+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0009\\exit_model_report.json",
+      "bytes": 2418,
+      "modified_at": "2026-08-11T19:42:07.467382+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0009\\version.json",
+      "bytes": 3130,
+      "modified_at": "2026-08-11T19:42:07.536039+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0010\\btc_5m_exit_value.joblib",
+      "bytes": 1140607,
+      "modified_at": "2026-08-12T13:21:48.813737+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0010\\exit_model_report.json",
+      "bytes": 3068,
+      "modified_at": "2026-08-12T13:21:48.813737+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0010\\version.json",
+      "bytes": 3813,
+      "modified_at": "2026-08-12T13:21:48.866815+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0011\\btc_5m_exit_value.joblib",
+      "bytes": 1141359,
+      "modified_at": "2026-08-13T12:57:30.821972+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0011\\exit_model_report.json",
+      "bytes": 3102,
+      "modified_at": "2026-08-13T12:57:30.822884+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0011\\version.json",
+      "bytes": 3847,
+      "modified_at": "2026-08-13T12:57:30.872203+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0012\\btc_5m_exit_value.joblib",
+      "bytes": 1143264,
+      "modified_at": "2026-08-13T17:45:21.123002+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0012\\exit_model_report.json",
+      "bytes": 3129,
+      "modified_at": "2026-08-13T17:45:21.125918+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0012\\version.json",
+      "bytes": 3874,
+      "modified_at": "2026-08-13T17:45:21.220260+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0013\\btc_5m_exit_value.joblib",
+      "bytes": 1144112,
+      "modified_at": "2026-08-13T21:16:42.651919+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0013\\exit_model_report.json",
+      "bytes": 2800,
+      "modified_at": "2026-08-13T21:16:42.654934+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0013\\version.json",
+      "bytes": 3545,
+      "modified_at": "2026-08-13T21:16:42.709631+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0014\\btc_5m_exit_value.joblib",
+      "bytes": 1144992,
+      "modified_at": "2026-08-14T07:28:51.864973+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0014\\exit_model_report.json",
+      "bytes": 2830,
+      "modified_at": "2026-08-14T07:28:51.865957+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\exit_value\\exit\\exit_value_exit_v0014\\version.json",
+      "bytes": 3575,
+      "modified_at": "2026-08-14T07:28:51.924944+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\experiments\\v13_control_20260813T173902Z\\artifacts\\catboost_bundle.joblib",
+      "bytes": 24316,
+      "modified_at": "2026-08-08T18:23:10.609600+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\experiments\\v13_control_20260813T173902Z\\artifacts\\catboost_entry.cbm",
+      "bytes": 188824,
+      "modified_at": "2026-08-08T18:23:10.543349+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\experiments\\v13_control_20260813T173902Z\\artifacts\\custom_entry.joblib",
+      "bytes": 439616,
+      "modified_at": "2026-08-08T18:22:47.930113+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\experiments\\v13_control_20260813T173930Z\\artifacts\\catboost_bundle.joblib",
+      "bytes": 24316,
+      "modified_at": "2026-08-08T18:23:10.609600+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\experiments\\v13_control_20260813T173930Z\\artifacts\\catboost_entry.cbm",
+      "bytes": 188824,
+      "modified_at": "2026-08-08T18:23:10.543349+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\experiments\\v13_control_20260813T173930Z\\artifacts\\custom_entry.joblib",
+      "bytes": 439616,
+      "modified_at": "2026-08-08T18:22:47.930113+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\experiments\\v13_control_20260813T173930Z\\snapshot.json",
+      "bytes": 2301,
+      "modified_at": "2026-08-13T17:39:30.973173+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\experiments\\v13_unpromoted_entry_value_drawdown_20260813T181736Z\\artifacts\\catboost_bundle.joblib",
+      "bytes": 24316,
+      "modified_at": "2026-08-08T18:23:10.609600+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\experiments\\v13_unpromoted_entry_value_drawdown_20260813T181736Z\\artifacts\\catboost_entry.cbm",
+      "bytes": 188824,
+      "modified_at": "2026-08-08T18:23:10.543349+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\experiments\\v13_unpromoted_entry_value_drawdown_20260813T181736Z\\artifacts\\custom_entry.joblib",
+      "bytes": 439616,
+      "modified_at": "2026-08-08T18:22:47.930113+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\experiments\\v13_unpromoted_entry_value_drawdown_20260813T181736Z\\snapshot.json",
+      "bytes": 2223,
+      "modified_at": "2026-08-13T18:17:36.283501+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\qwen\\qwen_v_2026-08-04T21-04-58_a3e1bbaa\\results.json",
+      "bytes": 515,
+      "modified_at": "2026-08-08T22:02:13.362892+00:00"
+    },
+    {
+      "path": "модели\\архив_версий\\qwen\\qwen_v_2026-08-07T00-20-05_4f87e698\\results.json",
+      "bytes": 525,
+      "modified_at": "2026-08-08T22:02:13.402186+00:00"
+    },
+    {
+      "path": "модели\\реестр_версий.json",
+      "bytes": 72886,
+      "modified_at": "2026-08-14T12:04:15.533982+00:00"
+    },
+    {
+      "path": "модели\\своя_дообученная\\btc_5m_direction.joblib",
+      "bytes": 439616,
+      "modified_at": "2026-08-08T18:22:47.930113+00:00"
+    },
+    {
+      "path": "модели\\своя_дообученная\\btc_5m_net_pnl.joblib",
+      "bytes": 1110587,
+      "modified_at": "2026-08-09T23:40:48.630234+00:00"
+    },
+    {
+      "path": "модели\\своя_дообученная\\model.json",
+      "bytes": 123,
+      "modified_at": "2026-08-03T20:03:57.497618+00:00"
+    }
+  ],
+  "copy": [
+    "app_config.py",
+    "api_config.py (передать отдельно и безопасно)",
+    "данные",
+    "модели",
+    "исходный_код",
+    "запуск",
+    "настройка_проекта",
+    "тесты"
+  ],
+  "exclude": [
+    ".venv",
+    ".venv-gpu",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    "журналы/*.log"
+  ],
+  "new_machine_command": "py -3.12 подготовить_gpu_компьютер.py --execute --build-data",
+  "finalize_before_copy": ".\\.venv\\Scripts\\python.exe .\\запустить_проект.py stop; затем .\\.venv\\Scripts\\python.exe .\\подготовить_переход.py --checkpoint"
+}

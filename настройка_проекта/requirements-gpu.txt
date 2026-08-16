@@ -1,0 +1,13 @@
+# Устанавливается только на будущем NVIDIA-компьютере после CUDA/PyTorch.
+# torch/torchvision/torchaudio намеренно отсутствуют: bootstrap установит wheel
+# для выбранной CUDA-ветки с официального PyTorch index-url.
+lightgbm>=4.5,<5
+optuna>=4.0,<5
+tensorboard>=2.18,<3
+accelerate>=1.2,<2
+transformers>=4.48,<5
+datasets>=3.2,<4
+peft>=0.14,<1
+trl>=0.13,<1
+bitsandbytes>=0.45,<1; platform_system != "Windows"
+safetensors>=0.5,<1

@@ -1,0 +1,63 @@
+# Секреты и локальная авторизация
+api_config.py
+token.py
+tokens.py
+.env
+.env.*
+!.env.example
+*.session
+*.session-journal
+
+# Python / IDE / тестовые кэши
+.venv/
+.venv-gpu/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.vscode/
+
+# Локальные журналы и runtime-файлы
+журналы/
+pip-install.stdout.log
+pip-install.stderr.log
+*.log
+*.pid
+
+# Базы, датасеты и временные хранилища
+данные/**
+!данные/README.md
+*.sqlite
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+*.parquet
+*.arrow
+*.feather
+*.csv.gz
+
+# Веса, чекпоинты и бинарные артефакты моделей
+модели/**
+!модели/README.md
+*.joblib
+*.pkl
+*.pickle
+*.cbm
+*.pt
+*.pth
+*.bin
+*.gguf
+*.safetensors
+checkpoint-*/
+
+# Локальный полный снимок переноса (около 19 ГБ)
+ПЕРЕНОС_НА_НОВЫЙ_ПК/**
+!ПЕРЕНОС_НА_НОВЫЙ_ПК/README.md
+
+# ОС и временные файлы
+Thumbs.db
+.DS_Store
+*.tmp
+*.bak

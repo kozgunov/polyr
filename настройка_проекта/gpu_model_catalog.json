@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "hardware_target": {"ram_gb": 32, "cpu": "Intel Core i7", "gpu": "NVIDIA RTX 5070", "minimum_vram_gb": 8},
+  "models": [
+    {"key": "custom_history_0_v1", "role": "direction_baseline_without_neighbor_history", "family": "hist_gradient_boosting", "neighbor_events": 0, "device": "cpu", "priority": 1},
+    {"key": "custom_history_3_v1", "role": "direction_with_short_neighbor_history", "family": "hist_gradient_boosting", "neighbor_events": 3, "device": "cpu", "priority": 1},
+    {"key": "custom_history_12_v1", "role": "direction_with_long_neighbor_history", "family": "hist_gradient_boosting", "neighbor_events": 12, "device": "cpu", "priority": 1},
+    {"key": "catboost_v14", "role": "direction_baseline", "family": "catboost", "device": "cpu_or_gpu", "priority": 1},
+    {"key": "lightgbm_v1", "role": "action_utility_baseline", "family": "lightgbm", "device": "cpu_or_gpu", "priority": 2},
+    {"key": "tcn_history_v1", "role": "sequence_direction_and_utility", "family": "temporal_convolution", "device": "cuda", "context_seconds": 120, "neighbor_events": [3, 12], "priority": 3},
+    {"key": "gru_v1", "role": "sequence_challenger", "family": "gru", "device": "cuda", "context_seconds": 120, "priority": 4},
+    {"key": "tiny_transformer_v1", "role": "sequence_challenger", "family": "transformer_encoder", "device": "cuda", "context_seconds": 120, "priority": 5},
+    {"key": "fill_model_v2", "role": "limit_fill_probability", "family": "lightgbm", "device": "cpu_or_gpu", "priority": 1},
+    {"key": "exit_tcn_v1", "role": "hold_close_utility", "family": "temporal_convolution", "device": "cuda", "context_seconds": 60, "priority": 3},
+    {"key": "qwen2_5_7b_4bit", "role": "news_context_and_explanations", "family": "llm", "model_id": "Qwen/Qwen2.5-7B-Instruct", "device": "cuda", "quantization": "4bit", "priority": 6}
+  ]
+}

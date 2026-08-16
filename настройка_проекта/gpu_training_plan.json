@@ -1,0 +1,13 @@
+{
+  "schema_version": 2,
+  "python": "3.12",
+  "cuda_wheel": "cu128",
+  "sequence": {"sample_seconds": 5, "context_seconds": [30, 60, 120], "primary_context_seconds": 120, "neighbor_event_windows": [0, 3, 12], "production_context_windows": [3, 12]},
+  "targets": ["resolution_up", "net_pnl_by_action", "fill_probability", "close_advantage", "future_max_favorable_pnl", "future_max_adverse_pnl"],
+  "validation": {"method": "purged_expanding_walk_forward", "purge_events": 2, "embargo_events": 2, "minimum_folds": 5},
+  "metrics": ["net_pnl", "pnl_ci95_lower", "profit_factor", "max_drawdown", "expectancy", "roc_auc", "pr_auc", "brier", "log_loss", "ece", "utility_mae", "utility_bias", "fill_auc", "up_down_share", "trades_per_hour", "latency_ms"],
+  "promotion": {"positive_fold_share": 0.8, "pnl_ci95_lower_gt": 0.0, "minimum_oos_events": 500, "minimum_trades_each_direction": 50, "shadow_before_live_events": 300},
+  "experiments": ["current_event_only", "plus_3_completed_events", "plus_12_completed_events"],
+  "leakage_policy": "neighbor event end_timestamp must be <= decision observed_at; chronological folds only",
+  "stages": ["hardware_audit", "verify_migration_manifest", "install_cuda_torch", "build_history_context", "build_sequence_dataset", "train_baselines", "train_sequence_challengers", "purged_walk_forward", "shadow_tournament", "paper_promotion"]
+}

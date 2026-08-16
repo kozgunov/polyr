@@ -1,0 +1,95 @@
+# Core numerical and data stack
+numpy
+scipy
+pandas
+scikit-learn
+statsmodels
+imbalanced-learn
+joblib
+tqdm
+
+# Visualisation and notebooks
+matplotlib
+seaborn
+plotly
+jupyterlab
+notebook
+ipykernel
+
+# Classical ML and experiment tracking
+xgboost
+lightgbm
+catboost
+optuna
+mlflow
+
+# Deep learning and NLP
+# PyTorch устанавливается отдельно скриптом «подготовить_gpu_компьютер.py»,
+# чтобы версия wheel точно соответствовала CUDA на новом компьютере.
+transformers>=4.50.0
+datasets
+accelerate
+peft
+trl
+# bitsandbytes устанавливается только в CUDA/Linux/Colab-среде для QLoRA.
+evaluate
+sentencepiece
+tokenizers
+safetensors
+nltk
+spacy
+keras
+
+# Image/data utilities already used by the environment
+pillow
+opencv-python
+
+# Polymarket CLOB V2 official client
+py-clob-client-v2==1.1.0
+# Polymarket gasless Proxy/Safe transactions: approvals and redeemPositions
+py-builder-relayer-client
+
+# Async HTTP and WebSocket collectors
+httpx
+aiohttp
+websockets
+orjson
+tenacity
+aiolimiter
+
+# Configuration and typed API payloads
+pydantic
+pydantic-settings
+python-dotenv
+
+# Wallet, Polygon and on-chain/oracle access
+web3
+
+# Telegram MTProto collector
+telethon
+
+# OpenAI Responses API and optional hosted model providers
+openai
+huggingface-hub
+
+# Local storage for raw events, features and backtests
+sqlalchemy
+aiosqlite
+duckdb
+pyarrow
+
+# Local services, dashboard and monitoring
+fastapi
+uvicorn[standard]
+psutil
+apscheduler
+structlog
+prometheus-client
+
+# Tests and API simulation
+pytest
+pytest-asyncio
+respx
+
+# Development quality checks
+ruff
