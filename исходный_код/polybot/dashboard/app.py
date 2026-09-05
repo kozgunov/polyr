@@ -629,13 +629,9 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
     avg_loss = abs(sum(x for x in closed_pnls if x < 0) / max(1, sum(x < 0 for x in closed_pnls)))
     counterfactual = {}
     if "counterfactual_entries" in table_names(connection):
-        cf = connection.execute(
-            """SELECT COUNT(*),COALESCE(AVG(counterfactual_pnl_usdc),0),
-                      COALESCE(SUM(CASE WHEN counterfactual_pnl_usdc>0 THEN counterfactual_pnl_usdc ELSE 0 END),0)
-               FROM (SELECT counterfactual_pnl_usdc FROM counterfactual_entries
-                     WHERE status='evaluated' ORDER BY id DESC LIMIT 1000)"""
-        ).fetchone()
-        counterfactual = {"evaluated": int(cf[0]), "average_pnl": float(cf[1]), "missed_positive_pnl": float(cf[2])}
+        # Полная counterfactual-агрегация читает гигабайты и не относится к
+        # оперативному контуру. Она строится отдельным offline-отчётом.
+        counterfactual = {"deferred_to_offline_report": True}
     total_wagered = sum(float(row.get("cost_usdc") or 0) for row in valid_positions)
     settled_statuses = {"closed", "resolved", "provisionally_resolved"}
     valid_realized = sum(
