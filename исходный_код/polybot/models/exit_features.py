@@ -38,7 +38,7 @@ def _number(value: Any, default: float = 0.0) -> float:
 
 def feature_map(
     state: Mapping[str, Any], outcome: str, current_bid: float | None,
-    shares: float, cost_usdc: float,
+    shares: float, cost_usdc: float, runtime_features: Mapping[str, Any] | None = None,
 ) -> dict[str, float]:
     """Возвращает признаки, доступные строго в момент принятия решения."""
     direction = 1.0 if outcome == "Up" else -1.0
@@ -73,6 +73,10 @@ def feature_map(
     for seconds in (15, 30, 60):
         lag = _number(lags.get(str(seconds), lags.get(seconds, distance)), distance)
         values[f"oriented_momentum_{seconds}s_pct"] = direction * (distance - lag)
+    # Последовательная exit-модель обучается на истории позиции. Эти значения
+    # рассчитываются движком только из снимков, существовавших к моменту решения.
+    for name, value in (runtime_features or {}).items():
+        values[str(name)] = _number(value)
     return values
 
 

@@ -11,14 +11,19 @@ import joblib
 import numpy as np
 from catboost import CatBoostClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, brier_score_loss, log_loss, roc_auc_score
+from sklearn.metrics import accuracy_score, average_precision_score, balanced_accuracy_score, brier_score_loss, log_loss, roc_auc_score
 
 from polybot.models.train_direction_model import load_dataset
 from polybot.models.artifact_versions import save_version_bundle
 
 
-def train(path: Path, allow_small_sample: bool = False, output: Path | None = None) -> dict[str, float | int | bool]:
-    x, y, groups = load_dataset(path)
+def train(
+    path: Path,
+    allow_small_sample: bool = False,
+    output: Path | None = None,
+    history_windows: tuple[int, ...] = (),
+) -> dict[str, float | int | bool]:
+    x, y, groups = load_dataset(path, history_windows)
     events = list(dict.fromkeys(groups.tolist()))
     if len(events) < settings.TRAINING_MIN_INDEPENDENT_EVENTS and not allow_small_sample:
         raise RuntimeError(f"TRAINING_BLOCKED: only {len(events)} independent events")
@@ -56,6 +61,7 @@ def train(path: Path, allow_small_sample: bool = False, output: Path | None = No
         "raw_log_loss": float(log_loss(y[test_mask], raw_probability, labels=[0, 1])),
         "balanced_accuracy": float(balanced_accuracy_score(y[test_mask], prediction)),
         "roc_auc": float(roc_auc_score(y[test_mask], probability)) if len(set(y[test_mask])) == 2 else 0.0,
+        "pr_auc": float(average_precision_score(y[test_mask], probability)) if len(set(y[test_mask])) == 2 else 0.0,
         "production_ready": len(events) >= settings.TRAINING_MIN_INDEPENDENT_EVENTS,
     }
     output = output or settings.MODEL_DIR / "catboost"
@@ -67,7 +73,8 @@ def train(path: Path, allow_small_sample: bool = False, output: Path | None = No
     joblib.dump({
         "calibrator": calibrator,
         "metrics": metrics,
-        "version": "v4_target_time_autoregressive_lags_event_platt_calibrated",
+        "history_windows": list(history_windows),
+        "version": "v5_target_time_path_history_event_platt_calibrated",
         "splits": {
             "train_events": sorted(train_events),
             "calibration_events": sorted(calibration_events),

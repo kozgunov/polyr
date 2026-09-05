@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from dataclasses import dataclass
 
 import app_config as settings
@@ -33,8 +34,15 @@ def limit_buy(key: str, requested_price: float, best_ask: float | None, ask_size
     queue_penalty = max(0.0, float(ask_size or 0.0)) * settings.EXECUTION_QUEUE_AHEAD_FRACTION
     executable = max(0.0, depth - min(depth, queue_penalty * 0.10))
     depth_ratio = min(1.0, executable / max(shares, 1e-9))
-    spread_penalty = min(0.45, float(spread or 1.0) * 3.0)
-    probability = max(settings.EXECUTION_MIN_FILL_PROBABILITY, min(0.98, 0.25 + 0.70 * depth_ratio - spread_penalty))
+    # Это оценка, а не «92% гарантии». Старая формула упиралась в одно и то же
+    # значение 0.92 при полном доступном объёме и spread=0.01. Теперь вероятность
+    # непрерывно зависит от глубины, spread и смоделированной сетевой задержки.
+    spread_factor = max(0.35, 1.0 - min(0.65, float(spread or 1.0) * 2.5))
+    latency_factor = max(0.35, math.exp(-latency / 3_500.0))
+    probability = max(
+        settings.EXECUTION_MIN_FILL_PROBABILITY,
+        min(0.995, depth_ratio * spread_factor * latency_factor),
+    )
     if _unit(key + ":fill") > probability or executable <= 0:
         return SimulatedFill("unfilled", 0.0, None, probability, latency, 0.0, "queue_or_liquidity_nonfill")
     filled = min(shares, executable)

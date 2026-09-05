@@ -13,6 +13,12 @@ def test_maker_has_no_platform_fee() -> None:
     assert platform_fee_usdc(100, 0.50, taker=False) == 0.0
 
 
+def test_market_specific_fee_schedule_is_used() -> None:
+    assert platform_fee_usdc(100, 0.50, fee_rate=0.07, fee_exponent=1) == pytest.approx(1.75)
+    assert platform_fee_usdc(100, 0.50, fee_rate=0.04, fee_exponent=1) == pytest.approx(1.00)
+    assert platform_fee_usdc(100, 0.50, fees_enabled=False) == 0.0
+
+
 def test_probability_equal_to_price_is_negative_edge_after_fee() -> None:
     assert net_buy_edge(0.80, 0.80) < 0
 

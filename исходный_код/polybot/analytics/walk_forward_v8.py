@@ -13,7 +13,7 @@ import app_config as settings
 import numpy as np
 from catboost import CatBoostClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import brier_score_loss, roc_auc_score
+from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 
 from polybot.models.train_direction_model import vector
 from polybot.trading.fees import total_fee_usdc
@@ -204,6 +204,7 @@ def run(path: Path, minimum_train_events: int = 200, fold_events: int = 50, cali
             "fit_events": len(fit_events), "calibration_events": len(validation_events),
             "test_events": len(test_list),
             "roc_auc": float(roc_auc_score(labels, test_probabilities, sample_weight=weights)),
+            "pr_auc": float(average_precision_score(labels, test_probabilities, sample_weight=weights)),
             "brier": float(brier_score_loss(labels, test_probabilities, sample_weight=weights)),
             "selected_model_weight": model_weight, "selected_min_expected_pnl": min_expected,
             "validation": validation_metrics, **metrics,
@@ -226,6 +227,7 @@ def run(path: Path, minimum_train_events: int = 200, fold_events: int = 50, cali
         "total_trades": sum(fold["trades"] for fold in folds),
         "total_net_pnl": sum(fold["net_pnl"] for fold in folds),
         "mean_roc_auc": sum(fold["roc_auc"] for fold in folds) / len(folds) if folds else None,
+        "mean_pr_auc": sum(fold["pr_auc"] for fold in folds) / len(folds) if folds else None,
         "mean_brier": sum(fold["brier"] for fold in folds) / len(folds) if folds else None,
         "production_gate": {
             "passed": bool(

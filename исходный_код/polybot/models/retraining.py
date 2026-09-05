@@ -21,11 +21,19 @@ from polybot.trading.fees import total_fee_usdc
 
 def _reward(pnl: float, notional: float) -> tuple[float, str]:
     roi = pnl / max(0.01, notional)
-    score = max(-1.0, min(3.0, roi))
+    # Прибыль ниже операционно значимого порога после комиссии не считается
+    # хорошим действием: модель должна учитывать альтернативную стоимость капитала.
+    if pnl < settings.MIN_ACCEPTABLE_NET_PNL_USDC:
+        shortfall = settings.MIN_ACCEPTABLE_NET_PNL_USDC - pnl
+        score = max(-1.0, min(-0.01, -shortfall / max(0.01, notional)))
+    else:
+        score = max(0.01, min(3.0, roi))
     if roi <= -0.5:
         return score, "catastrophic_loss"
     if roi < 0:
         return score, "loss"
+    if pnl < settings.MIN_ACCEPTABLE_NET_PNL_USDC:
+        return score, "inadequate_net_profit"
     if roi < 0.25:
         return score, "small_profit"
     if roi < 0.75:
@@ -51,7 +59,7 @@ def _qwen_dataset(connection: sqlite3.Connection, path: Path) -> dict[str, int]:
             shares = notional / float(ask)
             pnl = shares * int(label) - notional - total_fee_usdc(shares, float(ask))
             reward_score, reward_tier = _reward(pnl, notional)
-            action = f"BUY_{str(outcome).upper()}" if pnl > 0 else "WAIT"
+            action = f"BUY_{str(outcome).upper()}" if pnl >= settings.MIN_ACCEPTABLE_NET_PNL_USDC else "WAIT"
             distance = features.get("distance_to_target_pct")
             remaining = features.get("remaining_seconds")
             explanation = (
@@ -151,8 +159,12 @@ def run_if_due(force: bool = False) -> dict[str, Any]:
         snapshot_connection.close()
         custom_metrics = train_custom(
             snapshot_path, artifact_path=candidate / "custom" / "btc_5m_direction.joblib",
+            history_windows=settings.EVENT_HISTORY_LIVE_WINDOWS,
         )
-        catboost_metrics = train_catboost(snapshot_path, output=candidate / "catboost")
+        catboost_metrics = train_catboost(
+            snapshot_path, output=candidate / "catboost",
+            history_windows=settings.EVENT_HISTORY_LIVE_WINDOWS,
+        )
         action_value_dataset = build_action_value_dataset(snapshot_path)
         counterfactual_actions = build_counterfactual_actions(snapshot_path)
         try:

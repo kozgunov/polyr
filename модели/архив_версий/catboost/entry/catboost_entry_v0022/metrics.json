@@ -1,0 +1,16 @@
+{
+  "independent_events": 2443,
+  "train_events": 1465,
+  "calibration_events": 489,
+  "test_events": 489,
+  "rows": 211481,
+  "accuracy": 0.7537753928708317,
+  "brier": 0.1452846737744559,
+  "log_loss": 0.4233019996055855,
+  "raw_brier": 0.1467182100868274,
+  "raw_log_loss": 0.4268478801584004,
+  "balanced_accuracy": 0.7537740638883013,
+  "roc_auc": 0.8716950928080609,
+  "pr_auc": 0.8812473646026395,
+  "production_ready": true
+}

@@ -1,0 +1,23 @@
+{
+  "release": "best-models-2026-09-05",
+  "entry_model": "custom_entry_v0025",
+  "exit_model": "catboost_entry_v0022",
+  "decision_provider": "model_registry",
+  "paper_initial_balance_usdc": 300.0,
+  "max_event_exposure_usdc": 10.0,
+  "recommended_live_size_multiplier": 1.0,
+  "observed_live_session": {
+    "events": 27,
+    "wallet_net_pnl_usdc": 10.47,
+    "largest_observed_entry_price": 0.79,
+    "largest_observed_notional_usdc_approx": 3.9,
+    "source": "user-confirmed Polymarket account history",
+    "note": "Old local $14/$70/$151 positions were reconciliation artifacts and are excluded."
+  },
+  "safety": {
+    "live_default": false,
+    "live_requires_manual_dashboard_switch": true,
+    "max_consecutive_wrong_directions": 3,
+    "stale_validation_hard_stop": true
+  }
+}

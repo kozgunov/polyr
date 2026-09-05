@@ -12,7 +12,7 @@ import app_config as settings
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import balanced_accuracy_score, brier_score_loss, log_loss, roc_auc_score
+from sklearn.metrics import average_precision_score, balanced_accuracy_score, brier_score_loss, log_loss, roc_auc_score
 
 from polybot.models.event_history import build_summaries, context as history_context
 from polybot.models.temporal_validation import purged_expanding_folds
@@ -102,6 +102,7 @@ def evaluate(database: Path = settings.DATABASE_PATH) -> dict[str, Any]:
             fold_reports.append({
                 "fold": fold_index, "train_events": len(fold.train_events), "test_events": len(fold.test_events),
                 "roc_auc": float(roc_auc_score(y_test, probability, sample_weight=weights)),
+                "pr_auc": float(average_precision_score(y_test, probability, sample_weight=weights)),
                 "brier": float(brier_score_loss(y_test, probability, sample_weight=weights)),
                 "log_loss": float(log_loss(y_test, probability, sample_weight=weights, labels=[0, 1])),
                 "balanced_accuracy": float(balanced_accuracy_score(y_test, prediction, sample_weight=weights)),
@@ -110,7 +111,7 @@ def evaluate(database: Path = settings.DATABASE_PATH) -> dict[str, Any]:
             "history_events": int(raw_window), "rows": len(rows), "events": len(events), "folds": fold_reports,
             "mean": {
                 metric: float(np.mean([fold[metric] for fold in fold_reports])) if fold_reports else None
-                for metric in ("roc_auc", "brier", "log_loss", "balanced_accuracy")
+                for metric in ("roc_auc", "pr_auc", "brier", "log_loss", "balanced_accuracy")
             },
         }
     report = {

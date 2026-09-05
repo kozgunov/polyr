@@ -14,7 +14,7 @@ from typing import Any
 import api_config as api
 import app_config as settings
 from py_clob_client_v2 import ApiCreds, ClobClient, OrderArgs, PartialCreateOrderOptions
-from py_clob_client_v2.clob_types import AssetType, BalanceAllowanceParams, OrderType
+from py_clob_client_v2.clob_types import AssetType, BalanceAllowanceParams, OrderPayload, OrderType, TradeParams
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,7 +193,7 @@ def get_order(order_id: str) -> dict[str, Any]:
 
 def cancel_order(order_id: str) -> dict[str, Any]:
     """Отменяет одну конкретную заявку; массовая отмена здесь намеренно недоступна."""
-    raw = build_client().cancel_order(str(order_id))
+    raw = build_client().cancel_order(OrderPayload(orderID=str(order_id)))
     if isinstance(raw, dict):
         return raw
     if isinstance(raw, (list, tuple)):
@@ -201,3 +201,36 @@ def cancel_order(order_id: str) -> dict[str, Any]:
     if hasattr(raw, "model_dump"):
         return raw.model_dump()
     return {"result": raw}
+
+
+def get_order_trades(order_id: str) -> list[dict[str, Any]]:
+    """Возвращает реальные CLOB fills заявки для расчёта VWAP и комиссии."""
+    rows = build_client().get_trades(TradeParams(order_id=str(order_id)))
+    result: list[dict[str, Any]] = []
+    for row in rows or []:
+        if hasattr(row, "model_dump"):
+            row = row.model_dump()
+        elif hasattr(row, "to_dict"):
+            row = row.to_dict()
+        elif hasattr(row, "__dict__"):
+            row = vars(row)
+        if isinstance(row, dict):
+            result.append(row)
+    return result
+
+
+def summarize_order_fills(order_id: str) -> dict[str, float]:
+    """Считает фактические size/VWAP/fee только по legs указанной заявки."""
+    legs: list[tuple[float, float, float]] = []
+    for trade in get_order_trades(order_id):
+        if str(trade.get("taker_order_id") or "") == str(order_id):
+            legs.append((float(trade.get("size") or 0), float(trade.get("price") or 0),
+                         float(trade.get("fee_rate_bps") or 0)))
+        for maker in trade.get("maker_orders") or []:
+            if str(maker.get("order_id") or "") == str(order_id):
+                legs.append((float(maker.get("matched_amount") or 0), float(maker.get("price") or 0),
+                             float(maker.get("fee_rate_bps") or 0)))
+    size = sum(item[0] for item in legs)
+    notional = sum(item[0] * item[1] for item in legs)
+    fee = sum(item[0] * item[1] * item[2] / 10_000 for item in legs)
+    return {"size": size, "notional": notional, "vwap": notional / size if size else 0.0, "fee": fee}

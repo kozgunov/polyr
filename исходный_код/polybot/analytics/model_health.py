@@ -9,7 +9,7 @@ from statistics import mean
 from typing import Any
 
 import app_config as settings
-from sklearn.metrics import brier_score_loss, roc_auc_score
+from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 
 
 def _bootstrap_lower(values: list[float], seed: int = 42) -> float | None:
@@ -54,11 +54,12 @@ def model_health(connection: sqlite3.Connection) -> dict[str, Any]:
                 for row in sample if row["predicted_up_probability"] is not None and str(row["event_slug"]) in labels
             ]
             auc = roc_auc_score([p[0] for p in pairs], [p[1] for p in pairs]) if len({p[0] for p in pairs}) == 2 else None
+            pr_auc = average_precision_score([p[0] for p in pairs], [p[1] for p in pairs]) if len({p[0] for p in pairs}) == 2 else None
             brier = brier_score_loss([p[0] for p in pairs], [p[1] for p in pairs]) if pairs else None
             direction_share = max(directions.count("Up"), directions.count("Down")) / max(1, len(directions))
             model_result["windows"][str(window)] = {
                 "events": len(sample), "net_pnl": sum(pnls), "expectancy": mean(pnls) if pnls else 0.0,
-                "bootstrap_ci95_lower": _bootstrap_lower(pnls), "roc_auc": auc, "brier": brier,
+                "bootstrap_ci95_lower": _bootstrap_lower(pnls), "roc_auc": auc, "pr_auc": pr_auc, "brier": brier,
                 "up": directions.count("Up"), "down": directions.count("Down"),
                 "max_direction_share": direction_share,
             }
@@ -112,6 +113,7 @@ def model_health(connection: sqlite3.Connection) -> dict[str, Any]:
                 "expectancy": mean(pnls) if pnls else 0.0,
                 "max_drawdown": drawdown,
                 "roc_auc": roc_auc_score(y_true, y_score) if len(set(y_true)) == 2 else None,
+                "pr_auc": average_precision_score(y_true, y_score) if len(set(y_true)) == 2 else None,
                 "brier": brier_score_loss(y_true, y_score) if y_true else None,
                 "first_event": str(items[0]["event_slug"]) if items else None,
                 "last_event": str(items[-1]["event_slug"]) if items else None,

@@ -27,7 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_action_value_event_time
 """
 
 
-def build(path: Path = settings.DATABASE_PATH) -> dict[str, int]:
+def build(path: Path = settings.DATABASE_PATH, output: Path | None = None) -> dict[str, int]:
     connection = sqlite3.connect(path, timeout=settings.SQLITE_BUSY_TIMEOUT_MS / 1000)
     connection.row_factory = sqlite3.Row
     connection.execute(f"PRAGMA busy_timeout={settings.SQLITE_BUSY_TIMEOUT_MS}")
@@ -90,6 +90,7 @@ def build(path: Path = settings.DATABASE_PATH) -> dict[str, int]:
     events = int(connection.execute("SELECT COUNT(DISTINCT event_slug) FROM action_value_examples").fetchone()[0])
     connection.execute("PRAGMA optimize")
     connection.close()
-    settings.ACTION_VALUE_DATASET_PATH.parent.mkdir(parents=True, exist_ok=True)
-    settings.ACTION_VALUE_DATASET_PATH.write_text("\n".join(export_lines) + ("\n" if export_lines else ""), encoding="utf-8")
+    output = output or settings.ACTION_VALUE_DATASET_PATH
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("\n".join(export_lines) + ("\n" if export_lines else ""), encoding="utf-8")
     return {"rows": written, "events": events, "skipped": skipped}

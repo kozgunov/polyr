@@ -24,7 +24,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
+from sklearn.metrics import average_precision_score, brier_score_loss, log_loss, roc_auc_score
 
 from polybot.models.model_registry import MODEL_SPECS, get_model, model_is_ready, public_models
 from polybot.analytics.model_health import model_health
@@ -117,6 +117,29 @@ def _dashboard_password() -> str:
 DASHBOARD_PASSWORD = _dashboard_password()
 
 
+def event_metadata(slug: str | None) -> dict[str, Any]:
+    """Единое представление BTC 5m-события для ссылок и локального времени UI."""
+    value = str(slug or "")
+    try:
+        start_ts = int(value.rsplit("-", 1)[1])
+        start = datetime.fromtimestamp(start_ts, UTC)
+        end = start + timedelta(minutes=5)
+        return {
+            "event_slug": value,
+            "event_url": f"https://polymarket.com/event/{value}",
+            "event_start": start.isoformat(),
+            "event_end": end.isoformat(),
+        }
+    except (IndexError, ValueError, OSError):
+        return {"event_slug": value, "event_url": None, "event_start": None, "event_end": None}
+
+
+def enrich_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for row in rows:
+        row.update(event_metadata(row.get("event_slug")))
+    return rows
+
+
 @app.middleware("http")
 async def protect_remote_dashboard(request: Request, call_next):
     """Локальный браузер не спрашивает пароль; телефон и другие LAN-клиенты — спрашивают."""
@@ -163,6 +186,9 @@ def connect() -> sqlite3.Connection | None:
     connection = sqlite3.connect(settings.DATABASE_PATH, timeout=settings.SQLITE_BUSY_TIMEOUT_MS / 1000)
     connection.row_factory = sqlite3.Row
     connection.execute(f"PRAGMA busy_timeout={settings.SQLITE_BUSY_TIMEOUT_MS}")
+    # Большие window-запросы model health не должны зависеть от доступности
+    # системной TEMP-папки: временные B-tree держим в памяти процесса.
+    connection.execute("PRAGMA temp_store=MEMORY")
     return connection
 
 
@@ -193,13 +219,15 @@ def age_seconds(value: str | None) -> float | None:
 def latest_sources(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     if "external_prices" not in table_names(connection):
         return []
+    enabled = [name for name, flag in (("bybit", settings.ENABLE_BYBIT), ("okx", settings.ENABLE_OKX),
+                                        ("pyth", settings.ENABLE_PYTH)) if flag]
+    placeholders = ",".join("?" for _ in enabled)
     rows = connection.execute(
-        """SELECT p.source,p.price,p.confidence,p.collected_at,p.source_timestamp
-           FROM external_prices p JOIN (
-             SELECT source,MAX(id) id FROM external_prices WHERE source IN ('bybit','okx','pyth') GROUP BY source
-           ) x ON p.id=x.id
-           ORDER BY p.source"""
-    ).fetchall()
+        f"""SELECT p.source,p.price,p.confidence,p.collected_at,p.source_timestamp
+            FROM external_prices p JOIN (
+              SELECT source,MAX(id) id FROM external_prices WHERE source IN ({placeholders}) GROUP BY source
+            ) x ON p.id=x.id ORDER BY p.source""", enabled,
+    ).fetchall() if enabled else []
     return [{**dict(row), "age_seconds": age_seconds(row["collected_at"])} for row in rows]
 
 
@@ -219,11 +247,14 @@ def current_target(connection: sqlite3.Connection, slug: str | None) -> dict[str
     if not target:
         return None
     target_price = float(target["target_price"])
+    enabled = [name for name, flag in (("bybit", settings.ENABLE_BYBIT), ("okx", settings.ENABLE_OKX),
+                                        ("pyth", settings.ENABLE_PYTH)) if flag]
+    placeholders = ",".join("?" for _ in enabled)
     external_rows = connection.execute(
-        """SELECT p.price FROM external_prices p JOIN (
-             SELECT source,MAX(id) id FROM external_prices WHERE source IN ('bybit','okx','pyth') GROUP BY source
-           ) x ON p.id=x.id"""
-    ).fetchall()
+        f"""SELECT p.price FROM external_prices p JOIN (
+              SELECT source,MAX(id) id FROM external_prices WHERE source IN ({placeholders}) GROUP BY source
+            ) x ON p.id=x.id""", enabled,
+    ).fetchall() if enabled else []
     external_prices = sorted(float(row[0]) for row in external_rows)
     external_median = external_prices[len(external_prices) // 2] if external_prices else None
     reference_price = float(reference["reference_price"]) if reference else external_median
@@ -394,7 +425,7 @@ def model_comparison(connection: sqlite3.Connection) -> list[dict[str, Any]]:
             if probability is not None and label is not None:
                 calibration.append((int(label), min(1 - 1e-6, max(1e-6, float(probability)))))
         live_quality: dict[str, Any] = {
-            "calibration_events": len(calibration), "live_roc_auc": None,
+            "calibration_events": len(calibration), "live_roc_auc": None, "live_pr_auc": None,
             "live_brier": None, "live_log_loss": None,
         }
         if calibration:
@@ -404,6 +435,7 @@ def model_comparison(connection: sqlite3.Connection) -> list[dict[str, Any]]:
             live_quality["live_log_loss"] = float(log_loss(y_true, y_prob, labels=[0, 1]))
             if len(set(y_true)) == 2:
                 live_quality["live_roc_auc"] = float(roc_auc_score(y_true, y_prob))
+                live_quality["live_pr_auc"] = float(average_precision_score(y_true, y_prob))
         result.append({
             "model": model, "provider": provider, **metrics, **live_quality,
             "up_entries": up_entries, "down_entries": down_entries,
@@ -445,6 +477,26 @@ def model_equity_curves(connection: sqlite3.Connection) -> dict[str, list[dict[s
     return curves
 
 
+@_cached(300.0)
+def cached_model_analytics() -> dict[str, Any]:
+    """Тяжёлая межмодельная аналитика меняется только после новых сделок/обучения.
+
+    Отдельное соединение позволяет безопасно хранить только готовый JSON-результат,
+    не удерживая SQLite connection между запросами дашборда.
+    """
+    connection = connect()
+    if connection is None:
+        return {"paper_comparison": [], "equity_curves": {}, "health": {}}
+    try:
+        return {
+            "paper_comparison": model_comparison(connection),
+            "equity_curves": model_equity_curves(connection),
+            "health": model_health(connection),
+        }
+    finally:
+        connection.close()
+
+
 def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
     empty = {
         "status": "not_started", "initial_balance": settings.PAPER_INITIAL_BALANCE_USDC,
@@ -471,7 +523,7 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
            FROM paper_positions p
            JOIN paper_sessions s ON s.session_id=p.session_id
            LEFT JOIN model_decisions d ON d.id=p.entry_decision_id
-           WHERE p.session_id=? ORDER BY p.id DESC LIMIT 50""", (session_data["session_id"],)
+           WHERE p.session_id=? ORDER BY p.id DESC LIMIT 25""", (session_data["session_id"],)
     ).fetchall()]
     all_positions = [dict(row) for row in connection.execute(
         "SELECT * FROM paper_positions WHERE session_id=? ORDER BY id",
@@ -482,7 +534,7 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
     actions = [dict(row) for row in connection.execute(
         """SELECT observed_at,event_slug,action,confidence,reason,tags_json,executed,
                   predicted_up_probability,predicted_down_probability,expected_net_edge
-           FROM model_decisions WHERE session_id=? ORDER BY id DESC LIMIT 100""", (session_data["session_id"],)
+           FROM model_decisions WHERE session_id=? ORDER BY id DESC LIMIT 40""", (session_data["session_id"],)
     ).fetchall()]
     ml_rows = [dict(row) for row in connection.execute(
         """SELECT action,confidence,tags_json,executed FROM model_decisions
@@ -582,13 +634,14 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
         ).fetchone()
         counterfactual = {"evaluated": int(cf[0]), "average_pnl": float(cf[1]), "missed_positive_pnl": float(cf[2])}
     total_wagered = sum(float(row.get("cost_usdc") or 0) for row in valid_positions)
+    settled_statuses = {"closed", "resolved", "provisionally_resolved"}
     valid_realized = sum(
         float(row.get("realized_pnl_usdc") or 0) for row in valid_positions
-        if row.get("status") in {"closed", "resolved"}
+        if row.get("status") in settled_statuses
     )
     invalid_realized = sum(
         float(row.get("realized_pnl_usdc") or 0) for row in invalid_positions
-        if row.get("status") in {"closed", "resolved"}
+        if row.get("status") in settled_statuses
     )
     valid_open = [row for row in valid_positions if row.get("status") == "open"]
     valid_unrealized = sum(
@@ -608,7 +661,9 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
                       SUM(CASE WHEN status NOT IN ('filled','partial','partially_filled','partial_cancelled') THEN 1 ELSE 0 END) unfilled,
                       1.0*SUM(CASE WHEN status IN ('filled','partial','partially_filled','partial_cancelled') THEN 1 ELSE 0 END)/NULLIF(COUNT(*),0) fill_rate,
                       AVG(fill_probability) average_fill_probability,
-                      AVG(latency_ms) average_latency_ms
+                      AVG(latency_ms) average_latency_ms,
+                      AVG(observed_slippage_bps) average_observed_slippage_bps,
+                      AVG(book_age_ms_at_fill) average_book_age_ms_at_fill
                FROM paper_orders WHERE session_id=?""",
             (session_data["session_id"],),
         ).fetchone()
@@ -619,6 +674,9 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
                 "fill_rate": float(execution_row[4] or 0),
                 "average_fill_probability": float(execution_row[5] or 0),
                 "average_latency_ms": float(execution_row[6] or 0),
+                "average_observed_slippage_bps": float(execution_row[7] or 0),
+                "average_book_age_ms_at_fill": float(execution_row[8] or 0),
+                "fill_probability_kind": settings.EXECUTION_FILL_PROBABILITY_KIND,
             }
     extended = _extended_metrics(
         closed_pnls, float(session_data.get("total_fees_usdc", 0) or 0), session_data.get("started_at")
@@ -627,24 +685,39 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
         """SELECT id,event_slug,action,order_type,requested_price,filled_price,
                   requested_shares,shares,requested_notional_usdc,notional_usdc,fee_usdc,
                   status,created_at,expiration_at,price_cap,fill_probability,latency_ms,
-                  execution_reason,execution_valid,invalid_reason
-           FROM paper_orders WHERE session_id=? ORDER BY id DESC LIMIT 30""",
+                  execution_reason,execution_valid,invalid_reason,submit_best_bid,submit_best_ask,
+                  fill_best_bid,fill_best_ask,fill_observed_at,observed_slippage_bps,
+                  book_age_ms_at_submit,book_age_ms_at_fill,fill_probability_kind
+           FROM paper_orders WHERE session_id=? ORDER BY id DESC LIMIT 20""",
         (session_data["session_id"],),
     ).fetchall()]
+    enrich_events(positions)
+    enrich_events(actions)
+    enrich_events(valid_open)
+    enrich_events(recent_orders)
     metrics = {
         **stats, "roi_pct": float(stats["net_pnl_usdc"]) / total_wagered * 100 if total_wagered else 0.0,
         "average_win_usdc": avg_win, "average_loss_usdc": avg_loss,
         "payoff_ratio": avg_win / avg_loss if avg_loss else 0.0,
         **extended,
     }
+    exit_comparison = {
+        str(row[0]): {"events": int(row[1] or 0), "net_pnl_usdc": float(row[2] or 0),
+                     "average_pnl_usdc": float(row[3] or 0)}
+        for row in connection.execute(
+            """SELECT exit_timing,COUNT(*),SUM(COALESCE(realized_pnl_usdc,0)),
+                      AVG(COALESCE(realized_pnl_usdc,0))
+               FROM paper_positions WHERE session_id=? AND status IN ('closed','resolved')
+                 AND COALESCE(execution_valid,1)=1 GROUP BY exit_timing""",
+            (session_data["session_id"],),
+        )
+    }
     return {
         "status": session_data["status"], "session_id": session_data["session_id"],
         "initial_balance": session_data["initial_balance_usdc"], "cash": valid_cash,
         "equity": float(session_data["initial_balance_usdc"]) + valid_realized + valid_unrealized,
-        "realized_pnl": valid_realized,
-        "unrealized_pnl": valid_unrealized,
-        "total_wagered": total_wagered,
-        "open_positions": valid_open,
+        "realized_pnl": valid_realized, "unrealized_pnl": valid_unrealized,
+        "total_wagered": total_wagered, "open_positions": valid_open,
         "recent_positions": positions, "recent_actions": actions, "resolved_events": resolved,
         "execution_reality": {
             "raw_realized_pnl": float(session_data["realized_pnl_usdc"] or 0),
@@ -652,17 +725,82 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
             "valid_positions": len(valid_positions), "invalid_positions": len(invalid_positions),
             "invalid_reasons": dict(Counter(str(row.get("invalid_reason") or "unknown") for row in invalid_positions)),
         },
+        "provisional_events": sum(row.get("status") == "provisionally_resolved" for row in valid_positions),
+        "provisional_realized_pnl": sum(
+            float(row.get("realized_pnl_usdc") or 0) for row in valid_positions
+            if row.get("status") == "provisionally_resolved"
+        ),
         "misalignment_signals": int(misalignment[0] or 0), "misalignment_executed": int(misalignment[1] or 0),
         "misalignment_pnl": float(misalignment_pnl or 0.0),
         "strategy": session_data["strategy_version"], "model": session_data["model_name"],
         "metrics": metrics, "loss_streak": int(session_data.get("consecutive_losses", 0) or 0),
         "fees": float(session_data.get("total_fees_usdc", 0) or 0), "counterfactual": counterfactual,
         "execution": execution, "recent_orders": recent_orders, "ml_policy_metrics": ml_policy_metrics,
-        "stopped_reason": session_data.get("stopped_reason"),
-        "run_label": session_data.get("run_label"),
+        "exit_comparison": exit_comparison,
+        "stopped_reason": session_data.get("stopped_reason"), "run_label": session_data.get("run_label"),
     }
 
 
+def next_event_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
+    empty = {"enabled": settings.NEXT_EVENT_CONTEXT_ENABLED, "latest": None, "evaluated": 0,
+             "direction_accuracy": None, "hypothetical_fills": 0, "hypothetical_pnl_usdc": 0.0,
+             "fill_rate": None, "expectancy_per_fill_usdc": None, "raw_samples": 0,
+             "live_preopen_enabled": settings.NEXT_EVENT_PREOPEN_LIVE_ENABLED,
+             "active_shadow_orders": [], "shadow_order_history": {}}
+    if connection is None or "next_event_forecasts" not in table_names(connection):
+        return empty
+    latest_row = connection.execute(
+        "SELECT * FROM next_event_forecasts WHERE status!='invalid_after_start' ORDER BY observed_at DESC LIMIT 1"
+    ).fetchone()
+    # 15-секундные наблюдения одного будущего события — это временной ряд,
+    # а не независимые сделки. Для честного отчёта берём последний прогноз
+    # перед стартом каждого next_event ровно один раз.
+    summary = connection.execute(
+        """SELECT COUNT(*) events,
+                  AVG(CASE WHEN (f.predicted_direction='Up' AND f.next_resolved_label=1)
+                                OR (f.predicted_direction='Down' AND f.next_resolved_label=0)
+                           THEN 1.0 ELSE 0.0 END) direction_accuracy,
+                  SUM(COALESCE(f.hypothetical_filled,0)) fills,
+                  SUM(CASE WHEN f.hypothetical_filled=1 THEN COALESCE(f.hypothetical_pnl_usdc,0) ELSE 0 END) pnl
+           FROM next_event_forecasts f
+           JOIN (SELECT next_event_slug,MAX(id) id FROM next_event_forecasts
+                 WHERE status='evaluated' AND unixepoch(observed_at)<
+                       CAST(SUBSTR(next_event_slug,INSTR(next_event_slug,'5m-')+3) AS INTEGER)
+                 GROUP BY next_event_slug) last ON last.id=f.id"""
+    ).fetchone()
+    raw_samples = int(connection.execute(
+        "SELECT COUNT(*) FROM next_event_forecasts WHERE status='evaluated'"
+    ).fetchone()[0])
+    latest = dict(latest_row) if latest_row else None
+    if latest:
+        latest.update(event_metadata(latest.get("next_event_slug")))
+        latest["source_event"] = event_metadata(latest.get("source_event_slug"))
+    events = int(summary[0] or 0)
+    fills = int(summary[2] or 0)
+    pnl = float(summary[3] or 0.0)
+    active_orders: list[dict[str, Any]] = []
+    lifecycle: dict[str, int] = {}
+    if "shadow_preopen_orders" in table_names(connection):
+        active_orders = [dict(row) for row in connection.execute(
+            """SELECT * FROM shadow_preopen_orders
+               WHERE status IN ('working','filled_shadow')
+                 AND CAST(SUBSTR(next_event_slug,INSTR(next_event_slug,'5m-')+3) AS INTEGER)>unixepoch('now')
+               ORDER BY id DESC LIMIT 20"""
+        ).fetchall()]
+        for order in active_orders:
+            order.update(event_metadata(order.get("next_event_slug")))
+        lifecycle = {str(row[0]): int(row[1]) for row in connection.execute(
+            "SELECT status,COUNT(*) FROM shadow_preopen_orders GROUP BY status"
+        )}
+    return {
+        **empty, "latest": latest, "evaluated": events,
+        "direction_accuracy": float(summary[1]) if summary[1] is not None else None,
+        "hypothetical_fills": fills, "hypothetical_pnl_usdc": pnl,
+        "fill_rate": fills / events if events else None,
+        "expectancy_per_fill_usdc": pnl / fills if fills else None,
+        "raw_samples": raw_samples,
+        "active_shadow_orders": active_orders, "shadow_order_history": lifecycle,
+    }
 def live_overview(connection: sqlite3.Connection | None, initial_balance: float) -> dict[str, Any]:
     """Локальный LIVE-ledger, отделённый от demo-сессии и бумажного капитала."""
     empty = {
@@ -705,7 +843,8 @@ def live_overview(connection: sqlite3.Connection | None, initial_balance: float)
     )
     wagered = sum(float(row.get("cost_usdc") or 0) for row in positions)
     pnls = [float(row.get("realized_pnl_usdc") or 0) for row in closed]
-    extended = _extended_metrics(pnls, 0.0, min(str(row["opened_at"]) for row in positions))
+    live_fees = sum(float(row.get("fees_usdc") or 0) for row in positions)
+    extended = _extended_metrics(pnls, live_fees, min(str(row["opened_at"]) for row in positions))
     gross_profit = sum(value for value in pnls if value > 0)
     gross_loss = abs(sum(value for value in pnls if value < 0))
     metrics = {
@@ -723,7 +862,8 @@ def live_overview(connection: sqlite3.Connection | None, initial_balance: float)
         recent_orders = [dict(row) for row in connection.execute(
             """SELECT id,event_slug,outcome,side,order_id,order_type,requested_price,
                       requested_size,matched_size,status,created_at,expiration_at,last_checked_at,
-                      error,execution_valid,invalid_reason
+                      error,execution_valid,invalid_reason,average_fill_price,
+                      fill_notional_usdc,fee_usdc,fill_source
                FROM live_orders ORDER BY id DESC LIMIT 30"""
         ).fetchall()]
         order_count = sum(int(row[1]) for row in order_rows)
@@ -741,6 +881,7 @@ def live_overview(connection: sqlite3.Connection | None, initial_balance: float)
                       "fill_rate": (filled + partial) / order_count if order_count else 0.0,
                       "average_fill_probability": None, "average_latency_ms": 0.0},
         "recent_orders": recent_orders,
+        "fees": live_fees,
         "model": model,
     }
 
@@ -757,6 +898,13 @@ def runtime_control(connection: sqlite3.Connection | None, key: str, default: st
         return default
     row = connection.execute("SELECT control_value FROM runtime_controls WHERE control_key=?", (key,)).fetchone()
     return str(row[0]) if row else default
+
+
+def runtime_control_reason(connection: sqlite3.Connection | None, key: str) -> str | None:
+    if connection is None or "runtime_controls" not in table_names(connection):
+        return None
+    row = connection.execute("SELECT reason FROM runtime_controls WHERE control_key=?", (key,)).fetchone()
+    return str(row[0]) if row and row[0] else None
 
 
 def _active_position_count(connection: sqlite3.Connection) -> int:
@@ -913,8 +1061,10 @@ def model_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
         "active_name": get_model(entry_model).name,
         "entry_model": entry_model,
         "entry_model_name": get_model(entry_model).name,
+        "entry_model_version": runtime_control_reason(connection, "selected_entry_model"),
         "exit_model": exit_model,
         "exit_model_name": get_model(exit_model).name,
+        "exit_model_version": runtime_control_reason(connection, "selected_exit_model"),
         "pending_entry_model": runtime_control(connection, "pending_entry_model", "") or None,
         "pending_entry_apply_at": runtime_control(connection, "pending_entry_model_apply_at", "") or None,
         "pending_exit_model": runtime_control(connection, "pending_exit_model", "") or None,
@@ -1019,6 +1169,7 @@ def overview() -> dict[str, Any]:
     mode_switch_state = "idle"
     live_scale = settings.LIVE_SCALE_DEFAULT
     engine_process_alive = False
+    validation_status = "unknown"
     live_advisory: dict[str, Any] = {"desirable": False, "failures": ["нет доступной торговой статистики"]}
     if connection is None:
         sources: list[dict[str, Any]] = []
@@ -1034,11 +1185,14 @@ def overview() -> dict[str, Any]:
             counts = {table: count(connection, table) for table in tables}
             latest_run = dict(connection.execute("SELECT * FROM collector_runs ORDER BY id DESC LIMIT 1").fetchone() or {}) if "collector_runs" in tables else None
             current_event = dict(connection.execute("SELECT slug,title,active,closed,end_date,fetched_at FROM events ORDER BY fetched_at DESC LIMIT 1").fetchone() or {}) if "events" in tables else None
+            if current_event:
+                current_event.update(event_metadata(current_event.get("slug")))
             sources = latest_sources(connection)
             latency = latency_metrics(connection)
             target = current_target(connection, current_event.get("slug") if current_event else None)
             database = {"exists": True, "path": str(settings.DATABASE_PATH), "counts": counts, "latest_run": latest_run, "current_event": current_event, "current_target": target, "tables": tables}
             paper = paper_overview(connection)
+            next_event = next_event_overview(connection)
             dataset = dataset_overview(connection)
             mode = runtime_mode(connection)
             requested_mode = runtime_control(connection, "requested_trading_mode", mode)
@@ -1048,12 +1202,13 @@ def overview() -> dict[str, Any]:
             except ValueError:
                 live_scale = settings.LIVE_SCALE_DEFAULT
             engine_state = runtime_control(connection, "engine_state", "paused")
+            validation_status = runtime_control(connection, "validation_status", "unknown")
             engine_process_alive = engine_alive(connection)
+            if not engine_process_alive:
+                engine_state = "stopped"
             models = model_overview(connection)
             live = live_overview(connection, settings.PAPER_INITIAL_BALANCE_USDC * live_scale)
-            models["paper_comparison"] = model_comparison(connection)
-            models["equity_curves"] = model_equity_curves(connection)
-            models["health"] = model_health(connection)
+            models.update(cached_model_analytics())
             latest_session = connection.execute(
                 "SELECT session_id FROM paper_sessions ORDER BY started_at DESC LIMIT 1"
             ).fetchone() if "paper_sessions" in tables else None
@@ -1078,6 +1233,8 @@ def overview() -> dict[str, Any]:
         finally:
             connection.close()
     active_trading = paper
+    if connection is None:
+        next_event = next_event_overview(None)
     if mode == "live":
         live_connection = connect()
         try:
@@ -1105,9 +1262,8 @@ def overview() -> dict[str, Any]:
             "metrics": paper.get("ml_policy_metrics", {}),
         },
         "project_summary": summary,
-        "trading": {"mode": mode if connection is not None else "paper", "requested_mode": requested_mode, "mode_switch_state": mode_switch_state, "engine_state": engine_state if connection is not None else "stopped", "engine_process_alive": engine_process_alive if connection is not None else False, "live_enabled": mode == "live", "live_advisory": live_advisory, "live_executor_implemented": settings.LIVE_EXECUTOR_IMPLEMENTED, "live_keys_rotated": settings.LIVE_KEYS_ROTATED_AFTER_AUDIT, "live_scale": live_scale, "live_scale_min": settings.LIVE_SCALE_MIN, "live_scale_max": settings.LIVE_SCALE_MAX, "live_effective_budget_usdc": settings.PAPER_INITIAL_BALANCE_USDC * live_scale, "live_effective_max_position_usdc": settings.MAX_POSITION_USDC * live_scale, "live_canary_max_loss_usdc": settings.LIVE_CANARY_MAX_LOSS_USDC, "kill_switch": settings.KILL_SWITCH, "max_position_usdc": settings.MAX_POSITION_USDC, "max_daily_loss_usdc": settings.MAX_DAILY_LOSS_USDC, "max_consecutive_losses": settings.MAX_CONSECUTIVE_LOSSES, "early_entry": settings.EARLY_ENTRY_ENABLED, "early_exit": settings.EARLY_EXIT_ENABLED, "entry_confidence": settings.MIN_ENTRY_CONFIDENCE, "max_held_win_probability_for_exit": settings.MAX_HELD_WIN_PROBABILITY_FOR_EXIT, "partial_exit_confidence": settings.PARTIAL_EXIT_CONFIDENCE, "entry_notional_usdc": settings.PAPER_ENTRY_NOTIONAL_USDC, "max_entry_price": settings.PAPER_MAX_ENTRY_PRICE, "min_entry_price": settings.PAPER_MIN_ENTRY_PRICE, "min_entry_edge": settings.PAPER_MIN_ENTRY_NET_EDGE, "value_safety_margin": settings.ENTRY_VALUE_SAFETY_MARGIN, "min_expected_pnl": settings.ACTION_VALUE_MIN_EXPECTED_PNL_USDC, "probability_model_weight": settings.ACTION_PROBABILITY_MODEL_WEIGHT, "adaptive_position_sizing": settings.ADAPTIVE_POSITION_SIZING_ENABLED, "position_size_tiers": settings.POSITION_SIZE_EDGE_TIERS, "realistic_execution": settings.EXECUTION_SIMULATION_ENABLED, "entry_start_seconds": settings.PAPER_MIN_ENTRY_SECONDS_AFTER_OPEN, "last_entry_remaining_seconds": settings.PAPER_LAST_ENTRY_SECONDS_BEFORE_CLOSE, "five_stage_exit": settings.FIVE_STAGE_EXIT_ENABLED, "exit_profit_steps": settings.EXIT_STAGE_PROFIT_RETURN_PCT, "exit_risk_steps": settings.EXIT_STAGE_MAX_HELD_PROBABILITY, "action_value": action_value_overview()},
-        "paper": paper,
-        "live": live,
+        "trading": {"mode": mode if connection is not None else "paper", "requested_mode": requested_mode, "mode_switch_state": mode_switch_state, "engine_state": engine_state if connection is not None else "stopped", "engine_process_alive": engine_process_alive if connection is not None else False, "live_enabled": mode == "live", "live_advisory": live_advisory, "live_executor_implemented": settings.LIVE_EXECUTOR_IMPLEMENTED, "live_keys_rotated": settings.LIVE_KEYS_ROTATED_AFTER_AUDIT, "live_scale": live_scale, "live_scale_min": settings.LIVE_SCALE_MIN, "live_scale_max": settings.LIVE_SCALE_MAX, "live_effective_budget_usdc": settings.PAPER_INITIAL_BALANCE_USDC * live_scale, "live_effective_max_position_usdc": settings.MAX_POSITION_USDC * live_scale, "live_canary_max_loss_usdc": settings.LIVE_CANARY_MAX_LOSS_USDC, "kill_switch": settings.KILL_SWITCH, "max_position_usdc": settings.MAX_POSITION_USDC, "max_daily_loss_usdc": settings.MAX_DAILY_LOSS_USDC, "max_consecutive_losses": settings.MAX_CONSECUTIVE_LOSSES, "max_consecutive_wrong_directions": settings.MAX_CONSECUTIVE_WRONG_DIRECTIONS, "validation_hard_stop_age_seconds": settings.VALIDATION_HARD_STOP_AGE_SECONDS, "validation_hard_stop_cycles": settings.VALIDATION_HARD_STOP_CONSECUTIVE_CYCLES, "validation_status": validation_status, "entry_order_type": settings.ENTRY_ORDER_TYPE, "exit_order_type": settings.EXIT_ORDER_TYPE, "next_event_shadow_enabled": settings.NEXT_EVENT_PREOPEN_SHADOW_ENABLED, "next_event_live_enabled": settings.NEXT_EVENT_PREOPEN_LIVE_ENABLED, "early_entry": settings.EARLY_ENTRY_ENABLED, "early_exit": settings.EARLY_EXIT_ENABLED, "full_exit_only": settings.FULL_EXIT_ONLY_ENABLED, "entry_grid_enabled": settings.ENTRY_GRID_ENABLED, "entry_grid_live_enabled": settings.ENTRY_GRID_LIVE_ENABLED, "entry_grid_orders": [settings.ENTRY_GRID_MIN_ORDERS, settings.ENTRY_GRID_MAX_ORDERS], "entry_grid_price_step": settings.ENTRY_GRID_PRICE_STEP, "entry_grid_min_order_usdc": settings.ENTRY_GRID_MIN_ORDER_USDC, "entry_confidence": settings.MIN_ENTRY_CONFIDENCE, "max_held_win_probability_for_exit": settings.MAX_HELD_WIN_PROBABILITY_FOR_EXIT, "partial_exit_confidence": settings.PARTIAL_EXIT_CONFIDENCE, "entry_notional_usdc": settings.PAPER_ENTRY_NOTIONAL_USDC, "max_entry_price": settings.PAPER_MAX_ENTRY_PRICE, "min_entry_price": settings.PAPER_MIN_ENTRY_PRICE, "min_entry_edge": settings.PAPER_MIN_ENTRY_NET_EDGE, "value_safety_margin": settings.ENTRY_VALUE_SAFETY_MARGIN, "min_expected_pnl": settings.ACTION_VALUE_MIN_EXPECTED_PNL_USDC, "probability_model_weight": settings.ACTION_PROBABILITY_MODEL_WEIGHT, "adaptive_position_sizing": settings.ADAPTIVE_POSITION_SIZING_ENABLED, "position_size_tiers": settings.POSITION_SIZE_EDGE_TIERS, "realistic_execution": settings.EXECUTION_SIMULATION_ENABLED, "model_time_gates_enabled": settings.MODEL_TIME_GATES_ENABLED, "entry_start_seconds": settings.PAPER_MIN_ENTRY_SECONDS_AFTER_OPEN, "last_entry_remaining_seconds": settings.PAPER_LAST_ENTRY_SECONDS_BEFORE_CLOSE, "five_stage_exit": settings.FIVE_STAGE_EXIT_ENABLED, "exit_profit_steps": settings.EXIT_STAGE_PROFIT_RETURN_PCT, "exit_risk_steps": settings.EXIT_STAGE_MAX_HELD_PROBABILITY, "action_value": action_value_overview()},
+        "next_event": next_event,
         "active_trading": active_trading,
         "dataset": dataset,
         "economics": {"realized_pnl": active_trading["realized_pnl"], "unrealized_pnl": active_trading["unrealized_pnl"], "gross_income": max(0.0, active_trading["realized_pnl"] + active_trading.get("fees", 0)), "fees": active_trading.get("fees", 0), "estimated_slippage": active_trading["total_wagered"] * settings.ESTIMATED_SLIPPAGE_BPS / 10_000, "status": ("LIVE: локальный ledger по фактически исполненным ордерам" if mode == "live" else "Net PnL includes simulated Polymarket crypto taker fees")},
@@ -1124,6 +1280,7 @@ def overview() -> dict[str, Any]:
             "pnl_ci": "95% интервал среднего PnL сделки. Если нижняя граница ≤ 0, положительное ожидание ещё не доказано.",
             "recovery_factor": "Чистый PnL / максимальная просадка в долларах.",
             "roc_auc": "Способность ранжировать выигрышные исходы выше проигрышных: 0.5 — случайно, 1.0 — идеально. Не задаёт прибыльность сама по себе.",
+            "pr_auc": "Precision–Recall AUC: качество поиска положительного исхода при дисбалансе классов. Сравнивается с базовой долей положительных меток, а не автоматически с 0.5.",
             "brier": "Средняя квадратичная ошибка вероятности. Ниже лучше; строго наказывает чрезмерную уверенность.",
             "log_loss": "Логарифмическая ошибка вероятности. Ниже лучше; особенно сильно наказывает уверенные ошибки.",
         },
@@ -1132,8 +1289,8 @@ def overview() -> dict[str, Any]:
 
 @app.post("/api/trading-control")
 def trading_control(request: TradingControlRequest) -> dict[str, Any]:
-    if request.action not in {"stop", "resume", "new_session"}:
-        raise HTTPException(400, "action must be stop, resume or new_session")
+    if request.action not in {"stop", "resume", "new_session", "manual_unlock"}:
+        raise HTTPException(400, "action must be stop, resume, new_session or manual_unlock")
     connection = connect()
     if connection is None:
         raise HTTPException(409, "Database is not initialized")
@@ -1161,7 +1318,7 @@ def trading_control(request: TradingControlRequest) -> dict[str, Any]:
             if latest and latest["status"] == "paused":
                 connection.execute("UPDATE paper_sessions SET status='running' WHERE session_id=?", (latest["session_id"],))
             message = "Торговля продолжена с текущим бюджетом и историей"
-        else:
+        elif request.action == "new_session":
             stale_cutoff = int(datetime.now(UTC).timestamp() - 300 - settings.STALE_POSITION_NEW_SESSION_GRACE_SECONDS)
             open_count = int(connection.execute(
                 """SELECT COUNT(*) FROM paper_positions WHERE status='open'
@@ -1175,6 +1332,56 @@ def trading_control(request: TradingControlRequest) -> dict[str, Any]:
                 (datetime.now(UTC).isoformat(), "manual dashboard new $300 session"),
             )
             message = "Запрошен новый demo-прогон с бюджетом $300; предыдущий будет архивирован"
+        else:
+            # Кнопка снимает только статистический PAPER risk-stop. Она не обходит
+            # техническую валидацию и никогда не включает LIVE.
+            if runtime_mode(connection) != "paper":
+                raise HTTPException(409, "Ручная разблокировка доступна только в PAPER; LIVE она не включает")
+            validation = runtime_control(connection, "validation_status", "unknown")
+            if validation != "healthy":
+                raise HTTPException(409, f"Разблокировка запрещена: validation_status={validation}")
+            last_error = runtime_control(connection, "engine_last_error", "")
+            if last_error:
+                raise HTTPException(409, f"Разблокировка запрещена: trading-engine сообщает ошибку: {last_error}")
+            heartbeat = connection.execute(
+                "SELECT updated_at FROM runtime_controls WHERE control_key='engine_heartbeat'"
+            ).fetchone()
+            if not heartbeat:
+                raise HTTPException(409, "Разблокировка запрещена: нет heartbeat trading-engine")
+            try:
+                heartbeat_at = datetime.fromisoformat(str(heartbeat[0]).replace("Z", "+00:00"))
+                heartbeat_age = (datetime.now(UTC) - heartbeat_at.astimezone(UTC)).total_seconds()
+            except (TypeError, ValueError):
+                raise HTTPException(409, "Разблокировка запрещена: некорректный heartbeat trading-engine")
+            heartbeat_limit = max(60.0, float(settings.VALIDATION_HARD_STOP_AGE_SECONDS) * 3.0)
+            if heartbeat_age > heartbeat_limit:
+                raise HTTPException(409, f"Разблокировка запрещена: trading-engine не отвечает {heartbeat_age:.0f} сек")
+            if _active_position_count(connection):
+                raise HTTPException(409, "Разблокировка запрещена: есть открытая позиция или активная LIVE-заявка")
+            active_paper_orders = int(connection.execute(
+                """SELECT COUNT(*) FROM paper_orders
+                   WHERE status IN ('submitted','working','live','partial','partially_filled')
+                     AND (expiration_at IS NULL OR expiration_at>?)""",
+                (datetime.now(UTC).isoformat(),),
+            ).fetchone()[0]) if "paper_orders" in table_names(connection) else 0
+            if active_paper_orders:
+                raise HTTPException(409, "Разблокировка запрещена: есть активная PAPER-заявка")
+            changed_at = datetime.now(UTC).isoformat()
+            connection.execute(
+                "INSERT OR REPLACE INTO runtime_controls VALUES('engine_state','running',?,?)",
+                (changed_at, "manual PAPER cooldown unlock from dashboard"),
+            )
+            connection.execute(
+                "INSERT OR REPLACE INTO runtime_controls VALUES('paper_cooldown_state','manual_released',?,?)",
+                (changed_at, "same session resumed by user"),
+            )
+            connection.execute("DELETE FROM runtime_controls WHERE control_key='paper_cooldown_until'")
+            if latest:
+                connection.execute(
+                    "UPDATE paper_sessions SET status='running',consecutive_losses=0,stopped_reason=NULL WHERE session_id=?",
+                    (latest["session_id"],),
+                )
+            message = "PAPER разблокирован: текущая сессия продолжена с тем же бюджетом и историей"
         connection.commit()
         return {"action": request.action, "message": message}
     finally:

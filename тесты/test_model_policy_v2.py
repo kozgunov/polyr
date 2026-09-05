@@ -112,11 +112,11 @@ def test_entry_is_allowed_with_29_seconds_remaining(monkeypatch: pytest.MonkeyPa
     assert decision.action == "BUY_UP"
 
 
-def test_entry_is_blocked_inside_last_15_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_model_can_enter_inside_last_15_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(model_policy, "probability_up", lambda *_: 0.84)
     decision = model_policy.decide_with_model(market_state(remaining_seconds=14))
-    assert decision.action == "WAIT"
-    assert "late_entry_block" in decision.tags
+    assert decision.action == "BUY_UP"
+    assert "late_entry_block" not in decision.tags
 
 
 def test_trade_is_blocked_when_target_side_is_not_validated(monkeypatch: pytest.MonkeyPatch) -> None:

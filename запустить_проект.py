@@ -188,12 +188,20 @@ def request_trading_mode(mode: str) -> dict[str, object] | None:
         f"{DASHBOARD_URL}/api/trading-mode", data=payload,
         headers={"Content-Type": "application/json"}, method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Не удалось включить режим {mode}: HTTP {error.code}: {detail}") from error
+    last_error: urllib.error.HTTPError | None = None
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            last_error = error
+            # Во время одновременного старта collector может кратко занять SQLite.
+            # Повторяем только временную серверную ошибку; 4xx не маскируем.
+            if error.code < 500 or attempt == 4:
+                detail = error.read().decode("utf-8", errors="replace")
+                raise RuntimeError(f"Не удалось включить режим {mode}: HTTP {error.code}: {detail}") from error
+            time.sleep(1.0 + attempt * 0.5)
+    raise RuntimeError(f"Не удалось включить режим {mode}: {last_error}")
 
 
 def warm_dashboard_overview() -> None:

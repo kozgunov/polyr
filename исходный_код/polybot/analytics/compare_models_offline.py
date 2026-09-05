@@ -15,7 +15,7 @@ from typing import Any
 import app_config as settings
 import joblib
 import numpy as np
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, brier_score_loss, log_loss, roc_auc_score
+from sklearn.metrics import accuracy_score, average_precision_score, balanced_accuracy_score, brier_score_loss, log_loss, roc_auc_score
 
 from polybot.models.llm_runtime import infer as infer_llm
 from polybot.models.llm_runtime import release_model
@@ -200,6 +200,7 @@ def _metrics(name: str, states: list[tuple[MarketState, int]], probabilities: li
         "brier": float(brier_score_loss(labels, values)),
         "log_loss": float(log_loss(labels, values, labels=[0, 1])),
         "roc_auc": float(roc_auc_score(labels, values)) if len(set(labels.tolist())) == 2 else None,
+        "pr_auc": float(average_precision_score(labels, values)) if len(set(labels.tolist())) == 2 else None,
         **_financial_metrics(states, values.tolist()),
     }
 

@@ -36,7 +36,7 @@ SQLITE_WRITE_RETRY_DELAY_SECONDS = 0.25
 COLLECTOR_ENABLED = True
 COLLECTOR_BTC_5M_SLUG_PREFIX = "btc-updown-5m"
 COLLECTOR_DEFAULT_EVENT_URL = "https://polymarket.com/event/btc-updown-5m-1785756900"
-COLLECTOR_POLL_SECONDS = 5
+COLLECTOR_POLL_SECONDS = 2.0
 COLLECTOR_DISCOVERY_SECONDS = 15
 COLLECTOR_LABEL_INTERVAL_SECONDS = 60
 COLLECTOR_MAX_BOOK_LEVELS = 20
@@ -48,7 +48,7 @@ RAW_MESSAGE_SAMPLE_SECONDS = 5.0
 ENABLE_POLYMARKET = True
 ENABLE_BYBIT = True
 ENABLE_OKX = True
-ENABLE_PYTH = True
+ENABLE_PYTH = False  # Hermes требует API key; включить после заполнения PYTH_API_KEY.
 ENABLE_CHAINLINK_RTDS = False  # disabled: latency is unsuitable for the BTC 5m strategy
 ENABLE_TELEGRAM_NEWS = False
 
@@ -63,7 +63,7 @@ MAX_TARGET_REFERENCE_AGE_SECONDS = 20
 REQUIRE_OFFICIAL_EVENT_TARGET = True
 MAX_SOURCE_PRICE_DEVIATION_PCT = 0.35
 MAX_ALLOWED_SPREAD = 0.08
-MIN_REQUIRED_PRICE_SOURCES = 3
+MIN_REQUIRED_PRICE_SOURCES = 2
 BLOCK_ON_ORACLE_CONFLICT = True
 
 # ---------------------------------------------------------------------------
@@ -121,7 +121,7 @@ QWEN_LORA_ADAPTER_PATH = MODEL_DIR / "qwen_qlora_experiment_v1" / "adapter"
 WALK_FORWARD_V8_REPORT_PATH = MODEL_DIR / "walk_forward_v8_report.json"
 PNL_DATASET_MIN_ENTRY_PRICE = 0.05
 PNL_DATASET_MAX_ENTRY_PRICE = 0.95
-COUNTERFACTUAL_ENTRY_NOTIONALS_USDC = (1.0, 3.0, 5.0, 10.0)
+COUNTERFACTUAL_ENTRY_NOTIONALS_USDC = (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0)
 COUNTERFACTUAL_LIMIT_LEVELS = ("ask", "midpoint", "bid")
 COUNTERFACTUAL_WAIT_LOOKAHEAD_SECONDS = 30
 CONSENSUS_NUMERIC_MODEL = "custom"
@@ -136,11 +136,14 @@ TRAINING_CALIBRATION_SIZE = 0.20
 TRAINING_RANDOM_STATE = 42
 TRAINING_MIN_EXAMPLES = 1_000
 TRAINING_MIN_INDEPENDENT_EVENTS = 100
-AUTO_RETRAIN_ENABLED = True
+# Обучение запускается отдельно: оно не должно конкурировать со сбором данных
+# и торговым контуром за оперативную память и SQLite.
+AUTO_RETRAIN_ENABLED = False
 RETRAIN_EVERY_NEW_EVENTS = 100
 MODEL_CANDIDATE_DIR = MODEL_DIR / "candidates"
 TRAINING_ARTIFACT_PATH = MODEL_DIR / "своя_дообученная" / "btc_5m_direction.joblib"
 QWEN_TRAINING_DATASET_PATH = EXPORT_DIR / "qwen_trade_instructions.jsonl"
+PREPARED_TRAINING_DIR = DATA_DIR / "подготовленные_обучения"
 
 # GPU-ready pipeline. Эти пути и параметры работают и на CPU: CUDA-зависимости
 # устанавливаются позднее отдельной командой уже на новом компьютере.
@@ -176,8 +179,8 @@ MIGRATION_MANIFEST_PATH = PROJECT_ROOT / "настройка_проекта" / "
 # Trading controls. Live trading remains disabled by default.
 # ---------------------------------------------------------------------------
 TRADING_MODE = "paper"  # collect_only, paper, shadow, live
-STRATEGY_VERSION = "custom_catboost_fill_aware_policy_v17"
-STRATEGY_RUN_LABEL = "v17_custom_entry_v0018_catboost_exit_v0015_fill_probability_v1"
+STRATEGY_VERSION = "custom_entry_v25_catboost_exit_v22_full_exit_grid_v20"
+STRATEGY_RUN_LABEL = "v20_full_exit_adaptive_limit_entry_grid_paper"
 LIVE_TRADING_ENABLED = True
 KILL_SWITCH = False
 LIVE_EXECUTOR_IMPLEMENTED = True
@@ -191,14 +194,28 @@ TRADE_SIZE_MULTIPLIER_MAX = 3.0
 LIVE_CANARY_MAX_LOSS_USDC = 5.0
 LIVE_MIN_POSITION_USDC = 1.0
 MAX_POSITION_USDC = 10.0
-MAX_DAILY_LOSS_USDC = 20.0  # secondary guard; the mandatory 10-loss streak stop has priority
-MAX_CONSECUTIVE_LOSSES = 10
+MAX_DAILY_LOSS_USDC = 20.0  # secondary guard; direction/validation stops have priority
+MAX_CONSECUTIVE_LOSSES = 3
+MAX_CONSECUTIVE_WRONG_DIRECTIONS = 3
+PAPER_LOSS_STREAK_COOLDOWN_SECONDS = 30 * 60
+# Сильная задержка входных данных останавливает торговлю, а не только блокирует
+# отдельное решение. Сбор данных при этом продолжает работать для диагностики.
+VALIDATION_HARD_STOP_ENABLED = True
+VALIDATION_HARD_STOP_AGE_SECONDS = 45.0
+VALIDATION_HARD_STOP_CONSECUTIVE_CYCLES = 3
 # После завершения 5m-события старая позиция продолжает ждать resolution в фоне,
 # но не должна блокировать новую версионированную PAPER-сессию на целый час.
 STALE_POSITION_NEW_SESSION_GRACE_SECONDS = 60
+# PAPER-only предварительный расчёт после окончания пятиминутки. Он освобождает
+# торговый цикл, но никогда не подменяет официальный label в обучающих данных.
+PAPER_POST_EVENT_SETTLEMENT_ENABLED = True
+PAPER_POST_EVENT_SETTLEMENT_DELAY_SECONDS = 10
+PAPER_POST_EVENT_WIN_BID_THRESHOLD = 0.99
+PAPER_POST_EVENT_LOSS_ASK_THRESHOLD = 0.01
+PAPER_POST_EVENT_MAX_QUOTE_DISTANCE_SECONDS = 20
 MAX_OPEN_POSITIONS = 1
 MAX_FRESH_ENTRIES_PER_EVENT = 1
-MIN_ENTRY_CONFIDENCE = 0.72
+MIN_ENTRY_CONFIDENCE = 0.55
 EARLY_ENTRY_ENABLED = True
 EARLY_EXIT_ENABLED = True
 # Вероятность относится к исходу относительно Price to Beat, а не к цене контракта.
@@ -206,6 +223,7 @@ MAX_HELD_WIN_PROBABILITY_FOR_EXIT = 0.30
 PARTIAL_EXIT_CONFIDENCE = 0.62
 PARTIAL_EXIT_FRACTION = 0.50
 PARTIAL_EXIT_ENABLED = False
+FULL_EXIT_ONLY_ENABLED = True  # Exit-модель выбирает только HOLD либо полное CLOSE.
 ALLOW_POSITION_ADD = False
 TAKE_PROFIT_PCT = 0.12
 STOP_LOSS_PCT = 0.08
@@ -214,9 +232,20 @@ POLYMARKET_CRYPTO_TAKER_FEE_RATE = 0.07
 POLYMARKET_BUILDER_FEE_BPS = 0
 ENTRY_ORDER_TYPE = "GTD"
 TAKE_PROFIT_ORDER_TYPE = "GTD"
-EXIT_ORDER_TYPE = "FAK"
+EXIT_ORDER_TYPE = "GTD"
 GTD_EFFECTIVE_LIFETIME_SECONDS = 20
 FAK_PRICE_CAP_SLIPPAGE_BPS = 35
+
+# Лесенка лимитных входов. Модель по-прежнему определяет общий размер позиции;
+# исполнитель лишь распределяет его по более выгодным ценовым уровням. Число
+# уровней автоматически уменьшается, если бюджет не позволяет соблюсти минимум
+# CLOB (обычно 5 shares) и минимум $1 на каждую заявку.
+ENTRY_GRID_ENABLED = True
+ENTRY_GRID_LIVE_ENABLED = False  # Сначала валидируем fills в PAPER, затем отдельный canary.
+ENTRY_GRID_MIN_ORDERS = 3
+ENTRY_GRID_MAX_ORDERS = 5
+ENTRY_GRID_PRICE_STEP = 0.03
+ENTRY_GRID_MIN_ORDER_USDC = 1.0
 
 # Paper trading: complete simulation with no signed or submitted orders.
 PAPER_INITIAL_BALANCE_USDC = 300.0
@@ -225,6 +254,9 @@ PAPER_ADD_NOTIONAL_USDC = 1.5
 PAPER_MAX_EVENT_EXPOSURE_USDC = 10.0
 PAPER_DECISION_PROVIDER = "model_registry"  # активная модель выбирается через runtime_controls
 PAPER_POLL_SECONDS = 2.0
+# Время внутри пятиминутки является признаком модели, а не жёстким правилом.
+# При False вход возможен в любой момент, пока рынок технически не завершён.
+MODEL_TIME_GATES_ENABLED = False
 PAPER_MIN_ENTRY_SECONDS_AFTER_OPEN = 15
 PAPER_LAST_ENTRY_SECONDS_BEFORE_CLOSE = 15
 PAPER_FORCE_EXIT_SECONDS_BEFORE_CLOSE = 0  # without reversal signal, hold until resolution
@@ -235,10 +267,10 @@ PAPER_SHARP_MOVE_BLOCK_PCT = 0.22
 PAPER_CONSENSUS_MISPRICING_PROB = 0.08
 PAPER_MIN_SECONDS_BETWEEN_ACTIONS = 10
 PAPER_LIMIT_FILL_TOLERANCE = 0.01
-PAPER_MIN_ENTRY_PRICE = 0.05
-# OOS sweep: 0.90 дал 5 сделок и +$0.99 против 4 сделок и +$0.20 при 0.75.
-PAPER_MAX_ENTRY_PRICE = 0.97
-PAPER_DECISION_LOG_SECONDS = 5.0
+PAPER_MIN_ENTRY_PRICE = 0.10
+PAPER_MAX_ENTRY_PRICE = 0.80
+DEFAULT_CLOB_MIN_ORDER_SIZE_SHARES = 5.0
+PAPER_DECISION_LOG_SECONDS = 2.0
 PAPER_MIN_ENTRY_NET_EDGE = 0.04
 # Дополнительный запас сверх комиссии и рыночной цены: вход разрешён только
 # когда калиброванная вероятность покрывает fee/slippage и этот safety margin.
@@ -255,6 +287,7 @@ FILL_PROBABILITY_MAX_BRIER = 0.20
 # Даже небольшой положительный net-PnL допустим, если value-gate уже покрыл
 # комиссию, spread и запас ошибки. Главная целевая метрика остаётся суммой PnL сессии.
 ACTION_VALUE_MIN_EXPECTED_PNL_USDC = 0.02
+MIN_ACCEPTABLE_NET_PNL_USDC = 0.10
 ACTION_VALUE_MODEL_WEIGHT = 1.0
 ACTION_VALUE_MIN_R2 = 0.0
 ACTION_PROBABILITY_MODEL_WEIGHT = 0.75
@@ -271,16 +304,23 @@ REGIME_ENTRY_V5_DIR = MODEL_CANDIDATE_DIR / "entry_value_v5_regime_experts"
 REGIME_ENTRY_V5_ARTIFACT_PATH = REGIME_ENTRY_V5_DIR / "entry_value_v5_regime_experts.joblib"
 REGIME_ENTRY_V5_REPORT_PATH = REGIME_ENTRY_V5_DIR / "report.json"
 LOW_PROBABILITY_TRADING_ENABLED = False  # Только после отдельной проверки стратегии buy-low/sell-higher.
-# Размер позиции возрастает только вместе с net edge; верхняя граница остаётся $10.
+# Размер позиции определяется непрерывной risk-adjusted Kelly-функцией. Ступени
+# сохранены только как совместимый fallback для старых артефактов.
 ADAPTIVE_POSITION_SIZING_ENABLED = True
-POSITION_SIZE_EDGE_TIERS = ((0.04, 2.0), (0.08, 3.0), (0.18, 5.0))
+POSITION_SIZING_MODE = "calibrated_fractional_kelly_v1"
+POSITION_SIZE_EDGE_TIERS = ((0.04, 2.0), (0.08, 3.0), (0.18, 5.0), (0.35, 10.0))
+POSITION_SIZE_MIN_USDC = 1.0
+POSITION_SIZE_KELLY_FRACTION = 1.0
+POSITION_SIZE_KELLY_POWER = 1.5
+POSITION_SIZE_FILL_EXPONENT = 1.0
+POSITION_SIZE_MAX_EXPECTED_LOSS_USDC = 1.25
 ENTRY_SIGNAL_CONFIRMATIONS = 3
 REVERSAL_SIGNAL_CONFIRMATIONS = 3
 SIGNAL_CONFIRMATION_MIN_SECONDS = 6
 
 # Пятиступенчатый выход. Каждая ступень фиксирует 20% исходного количества:
 # доли ниже относятся к оставшейся позиции (20%, 25%, 33.3%, 50%, 100%).
-FIVE_STAGE_EXIT_ENABLED = True
+FIVE_STAGE_EXIT_ENABLED = True  # Ступени остаются признаками риска, но исполнение всегда полное.
 # Прибыль сама по себе больше не является сигналом выхода. Закрываемся ступенями
 # только при ухудшении вероятности удерживаемого исхода и переходе BTC за Price to Beat.
 EXIT_ON_PROFIT_ALONE = False
@@ -289,7 +329,7 @@ EXIT_STAGE_PROFIT_RETURN_PCT = (0.25, 0.50, 0.75, 1.00, 1.50)
 # Выход должен быть легче входа: первая защитная ступень доступна уже при
 # потере моделью преимущества, но фактическая продажа всё равно требует
 # подтверждения adverse-side и преимущества CLOSE над HOLD после комиссии.
-EXIT_STAGE_MAX_HELD_PROBABILITY = (0.55, 0.45, 0.35, 0.25, 0.15)
+EXIT_STAGE_MAX_HELD_PROBABILITY = (0.58, 0.48, 0.38, 0.28, 0.18)
 EXIT_RISK_SIGNAL_CONFIRMATIONS = 5
 EXIT_RISK_CONFIRMATION_MIN_SECONDS = 10
 EXIT_PROFIT_SIGNAL_CONFIRMATIONS = 2
@@ -299,9 +339,11 @@ EXIT_VALUE_ENABLED = True
 EXIT_VALUE_MARGIN_USDC = 0.05
 # Аналитический fallback не должен закрывать позицию из-за преимущества на уровне шума.
 # На завершённой текущей сессии порог $0.50 дал лучший результат среди проверенных порогов.
-EXIT_FALLBACK_MIN_ADVANTAGE_USDC = 0.50
-EXIT_FALLBACK_MIN_ADVANTAGE_FRACTION = 0.25
+EXIT_FALLBACK_MIN_ADVANTAGE_USDC = 0.15
+EXIT_FALLBACK_MIN_ADVANTAGE_FRACTION = 0.05
 EXIT_MODEL_MIN_ROWS = 300
+EXIT_WAIT_HORIZONS_SECONDS = (15, 30, 60)
+EXIT_TIMING_VALUE_MARGIN_USDC = 0.05
 # Реалистичный paper execution: очередь, глубина, задержка и partial/non-fill.
 EXECUTION_SIMULATION_ENABLED = True
 EXECUTION_QUEUE_AHEAD_FRACTION = 0.50
@@ -311,6 +353,19 @@ EXECUTION_LATENCY_JITTER_MS = 450
 EXECUTION_MIN_FILL_PROBABILITY = 0.15
 EXECUTION_RANDOM_SEED = 42
 MAX_EXECUTION_BOOK_AGE_SECONDS = 8.0
+# P(fill) в PAPER является модельной оценкой по стакану/latency, а не фактом.
+# Реальный fill-rate и фактическое движение стакана выводятся отдельно.
+EXECUTION_FILL_PROBABILITY_KIND = "book_depth_latency_heuristic_v2"
+
+# Shadow-эксперимент следующей пятиминутки. До promotion gate заявки на ещё не
+# начавшийся рынок не отправляются в LIVE.
+NEXT_EVENT_CONTEXT_ENABLED = True
+NEXT_EVENT_FORECAST_SAMPLE_SECONDS = 15.0
+NEXT_EVENT_PREOPEN_SHADOW_ENABLED = True
+NEXT_EVENT_PREOPEN_LIVE_ENABLED = False
+NEXT_EVENT_LIMIT_PRICE_CAP = 0.80
+NEXT_EVENT_LIMIT_PRICE_FLOOR = 0.10
+NEXT_EVENT_ORDER_REPLACE_TICKS = 2
 COUNTERFACTUAL_SAMPLE_SECONDS = 15
 COUNTERFACTUAL_ACTIONS = ("BUY_UP", "BUY_DOWN", "WAIT", "HOLD", "CLOSE")
 # Все три модели получают одинаковые независимые события; shadow не управляет капиталом.
@@ -326,9 +381,14 @@ DIRECTION_COLLAPSE_BLOCK_ENABLED = False
 ML_AUTONOMOUS_POLICY_ENABLED = True
 ML_AUTONOMOUS_POLICY_PAPER_ONLY = True
 ML_POLICY_DIRECTION_PRESERVING = True
-ML_POLICY_MIN_DIRECTION_CONFIDENCE = 0.72
+# Выбран на validation-периоде нового custom+history; test остаётся отрицательным,
+# поэтому версия разрешена только для PAPER-проверки стабильности.
+ML_POLICY_MIN_DIRECTION_CONFIDENCE = 0.55
 ML_POLICY_LIMIT_LEVELS = ("bid", "midpoint", "ask")
-ML_POLICY_NOTIONALS_USDC = (2.0, 3.0, 5.0)
+# Модель сравнивает весь допустимый диапазон размеров. $10 — бюджет/жёсткий
+# потолок на одно событие, а не обязательный размер каждой ставки.
+ML_POLICY_NOTIONALS_USDC = (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0)
+ML_POLICY_LARGE_SIZE_MANUAL_GATE_ENABLED = False
 ML_POLICY_FIVE_DOLLAR_MIN_OUTCOME_PROBABILITY = 0.82
 ML_POLICY_FIVE_DOLLAR_MIN_UTILITY_USDC = 0.18
 # WAIT конкурирует с BUY как полноценное действие и включает запас на ошибку оценки value.
@@ -338,7 +398,7 @@ ML_POLICY_REQUIRE_FRESH_DATA = True
 # Активный PAPER-сбор: сначала модель свободно ждёт сильный сигнал, но в конце
 # разрешённого окна должна выбрать лучший исполнимый вход. Почти случайный
 # прогноз, плохие данные и технически невалидный стакан по-прежнему разрешают WAIT.
-PAPER_ACTIVE_COLLECTION_ENABLED = True
+PAPER_ACTIVE_COLLECTION_ENABLED = False
 PAPER_ACTIVE_COLLECTION_FORCE_ENTRY_REMAINING_SECONDS = 90
 PAPER_ACTIVE_COLLECTION_MIN_DIRECTION_CONFIDENCE = 0.54
 DIRECTION_COLLAPSE_WINDOW_EVENTS = 30

@@ -66,7 +66,11 @@ def _fill(rows: list[dict[str, Any]], index: int, price: float) -> tuple[bool, f
     return False, None, False
 
 
-def build(path: Path = settings.DATABASE_PATH) -> dict[str, Any]:
+def build(
+    path: Path = settings.DATABASE_PATH,
+    jsonl_output: Path | None = None,
+    parquet_output: Path | None = None,
+) -> dict[str, Any]:
     connection = sqlite3.connect(path, timeout=settings.SQLITE_BUSY_TIMEOUT_MS / 1000)
     connection.row_factory = sqlite3.Row
     connection.execute(f"PRAGMA busy_timeout={settings.SQLITE_BUSY_TIMEOUT_MS}")
@@ -170,15 +174,17 @@ def build(path: Path = settings.DATABASE_PATH) -> dict[str, Any]:
     connection.commit()
     connection.close()
 
-    settings.COUNTERFACTUAL_ACTION_DATASET_PATH.parent.mkdir(parents=True, exist_ok=True)
+    jsonl_output = jsonl_output or settings.COUNTERFACTUAL_ACTION_DATASET_PATH
+    parquet_output = parquet_output or settings.COUNTERFACTUAL_ACTION_PARQUET_PATH
+    jsonl_output.parent.mkdir(parents=True, exist_ok=True)
     export_examples = [{key: value for key, value in item.items() if key != "features"} for item in examples]
     lines = [json.dumps(item, ensure_ascii=False) for item in export_examples]
-    settings.COUNTERFACTUAL_ACTION_DATASET_PATH.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    jsonl_output.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
     parquet_status = "not_available"
     try:
         import pandas as pd
         frame = pd.DataFrame(export_examples)
-        frame.to_parquet(settings.COUNTERFACTUAL_ACTION_PARQUET_PATH, index=False)
+        frame.to_parquet(parquet_output, index=False, compression="zstd")
         parquet_status = "ok"
     except (ImportError, ModuleNotFoundError):
         pass

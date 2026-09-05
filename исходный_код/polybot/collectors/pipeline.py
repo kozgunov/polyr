@@ -118,11 +118,21 @@ class Storage:
               operation TEXT NOT NULL, status TEXT NOT NULL, latency_ms REAL,
               detail TEXT
             );
+            CREATE TABLE IF NOT EXISTS future_event_snapshots (
+              id INTEGER PRIMARY KEY, collected_at TEXT NOT NULL,
+              source_event_slug TEXT NOT NULL, next_event_slug TEXT NOT NULL,
+              next_event_title TEXT, next_event_url TEXT NOT NULL, next_start_time TEXT,
+              seconds_before_start REAL, market_id TEXT NOT NULL, token_id TEXT NOT NULL,
+              outcome TEXT NOT NULL, best_bid REAL, best_bid_size REAL, best_ask REAL,
+              best_ask_size REAL, book_timestamp TEXT, book_hash TEXT, raw_json TEXT NOT NULL
+            );
             CREATE INDEX IF NOT EXISTS idx_snapshots_time ON market_snapshots(collected_at);
             CREATE INDEX IF NOT EXISTS idx_prices_time ON external_prices(collected_at);
             CREATE INDEX IF NOT EXISTS idx_prices_source_time ON external_prices(source,collected_at);
             CREATE INDEX IF NOT EXISTS idx_reference_event_time
               ON reference_price_snapshots(event_slug,collected_at);
+            CREATE INDEX IF NOT EXISTS idx_future_event_time
+              ON future_event_snapshots(next_event_slug,collected_at,outcome);
             """
         )
         self.db.commit()
@@ -210,6 +220,7 @@ class Collector:
         self.tokens: list[dict[str, str]] = []
         self.start_time: str | None = None
         self.end_time: str | None = None
+        self._last_future_preview = 0.0
 
     async def discover(self, client: httpx.AsyncClient) -> None:
         response = await client.get(f"{api.POLYMARKET_GAMMA_URL}/events/slug/{self.slug}")
@@ -230,11 +241,26 @@ class Collector:
             market_id = str(market["id"])
             if len(outcomes) != len(ids) or not ids:
                 raise RuntimeError(f"Invalid outcome/token mapping for market {market_id}")
+            # Параметры исполнения берём из CLOB market-info, а не считаем
+            # постоянными: tick/min size/fee curve могут различаться по рынкам.
+            market_payload = dict(market)
+            condition_id = market.get("conditionId") or market.get("condition_id")
+            if condition_id:
+                try:
+                    clob_response = await client.get(
+                        f"{api.POLYMARKET_CLOB_URL}/clob-markets/{condition_id}"
+                    )
+                    if clob_response.status_code == 200:
+                        market_payload["_clob_info"] = clob_response.json()
+                except httpx.HTTPError:
+                    # Сбор стакана продолжает работать; отсутствие market-info
+                    # видно в raw_json и не подменяется выдуманными значениями.
+                    pass
             self.storage.buffered_write(
                 "INSERT OR REPLACE INTO markets VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (market_id, event_id, market.get("slug"), market.get("question"), int(bool(market.get("active"))),
                  int(bool(market.get("closed"))), int(bool(market.get("enableOrderBook"))), market.get("endDate"),
-                 json.dumps(outcomes), json.dumps(ids), now(), json.dumps(market, ensure_ascii=False)),
+                 json.dumps(outcomes), json.dumps(ids), now(), json.dumps(market_payload, ensure_ascii=False)),
             )
             if market.get("enableOrderBook"):
                 self.start_time = market.get("eventStartTime") or self.start_time
@@ -245,7 +271,10 @@ class Collector:
                 )
         if not self.tokens:
             raise RuntimeError("No order-book tokens found")
-        await self.collect_reference(client)
+        try:
+            await self.collect_reference(client)
+        except (httpx.HTTPError, KeyError, TypeError, ValueError, RuntimeError) as error:
+            self.storage.raw("reference_discovery_error", self.slug, {"error": type(error).__name__})
 
     async def collect_reference(self, client: httpx.AsyncClient) -> None:
         """Сохраняет strike (Price to Beat) и текущую цену источника расчёта."""
@@ -320,8 +349,62 @@ class Collector:
                    best_bid_size,best_ask,best_ask_size,midpoint,spread,book_timestamp,book_hash,raw_json)
                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (now(), self.slug, token["market_id"], token["token_id"], token["outcome"], bid, bid_size, ask,
-                 ask_size, midpoint, spread, book.get("timestamp"), book.get("hash"), json.dumps(book, ensure_ascii=False)),
+                  ask_size, midpoint, spread, book.get("timestamp"), book.get("hash"), json.dumps(book, ensure_ascii=False)),
             )
+
+    async def collect_next_event_preview(self, client: httpx.AsyncClient) -> None:
+        """Собирает доступный до старта стакан следующей 5m-секции только для shadow/обучения."""
+        if not settings.NEXT_EVENT_CONTEXT_ENABLED:
+            return
+        monotonic_now = time.monotonic()
+        if monotonic_now - self._last_future_preview < settings.NEXT_EVENT_FORECAST_SAMPLE_SECONDS:
+            return
+        self._last_future_preview = monotonic_now
+        current_start = int(self.slug.rsplit("-", 1)[-1])
+        next_start = current_start + 300
+        next_slug = f"{settings.COLLECTOR_BTC_5M_SLUG_PREFIX}-{next_start}"
+        started = time.perf_counter()
+        response = await client.get(f"{api.POLYMARKET_GAMMA_URL}/events/slug/{next_slug}")
+        latency = (time.perf_counter() - started) * 1000
+        if response.status_code == 404:
+            self.storage.metric("polymarket_gamma", "next_event_preview", "unavailable", latency, next_slug)
+            return
+        response.raise_for_status()
+        event = response.json()
+        title = str(event.get("title") or f"BTC Up or Down · {next_slug}")
+        url = f"https://polymarket.com/event/{next_slug}"
+        next_start_iso = datetime.fromtimestamp(next_start, UTC).isoformat()
+        seconds_before = next_start - time.time()
+        tokens: list[dict[str, str]] = []
+        for market in event.get("markets", []):
+            outcomes, token_ids = parse_json(market.get("outcomes")), parse_json(market.get("clobTokenIds"))
+            if len(outcomes) != len(token_ids) or not market.get("enableOrderBook"):
+                continue
+            tokens.extend(
+                {"market_id": str(market["id"]), "token_id": str(token_id), "outcome": str(outcome)}
+                for outcome, token_id in zip(outcomes, token_ids, strict=True)
+            )
+        for token in tokens:
+            book_response = await client.get(
+                f"{api.POLYMARKET_CLOB_URL}/book", params={"token_id": token["token_id"]},
+            )
+            if book_response.status_code == 404:
+                continue
+            book_response.raise_for_status()
+            book = book_response.json()
+            bid, bid_size = best(book.get("bids", []), True)
+            ask, ask_size = best(book.get("asks", []), False)
+            self.storage.buffered_write(
+                """INSERT INTO future_event_snapshots(
+                     collected_at,source_event_slug,next_event_slug,next_event_title,next_event_url,
+                     next_start_time,seconds_before_start,market_id,token_id,outcome,best_bid,
+                     best_bid_size,best_ask,best_ask_size,book_timestamp,book_hash,raw_json)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (now(), self.slug, next_slug, title, url, next_start_iso, seconds_before,
+                 token["market_id"], token["token_id"], token["outcome"], bid, bid_size, ask,
+                 ask_size, book.get("timestamp"), book.get("hash"), json.dumps(book, ensure_ascii=False)),
+            )
+        self.storage.metric("polymarket_gamma", "next_event_preview", "ok", latency, next_slug)
 
     async def collect_prices(self, client: httpx.AsyncClient) -> None:
         async def bybit() -> tuple[str, float, float | None, str | None, Any, float]:
@@ -386,7 +469,10 @@ class Collector:
                         self.storage.metric("chainlink_rtds", "stream", "ok", max(0.0, time.time() * 1000 - timestamp))
 
     async def run(self, seconds: int, use_ws: bool) -> None:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(15), follow_redirects=True) as client:
+        # Короткий timeout не позволяет медленному auxiliary endpoint задержать
+        # весь 5-минутный цикл на 15 секунд. Следующий рынок собирается отдельно.
+        timeout = httpx.Timeout(8.0, connect=4.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             await self.discover(client)
             self.storage.flush()
             tasks = []
@@ -396,13 +482,32 @@ class Collector:
                 if settings.ENABLE_CHAINLINK_RTDS: tasks.append(asyncio.create_task(self.chainlink_ws()))
             try:
                 finish = time.monotonic() + seconds
+                future_preview_task: asyncio.Task | None = None
                 while time.monotonic() < finish:
-                    await asyncio.gather(
+                    if future_preview_task is None or future_preview_task.done():
+                        if future_preview_task is not None:
+                            try:
+                                future_preview_task.result()
+                            except Exception as error:  # auxiliary preview never blocks live data
+                                self.storage.raw("future_preview_error", self.slug, {"error": type(error).__name__})
+                        future_preview_task = asyncio.create_task(self.collect_next_event_preview(client))
+                    operations = ("books", "prices", "reference")
+                    results = await asyncio.gather(
                         self.collect_books(client), self.collect_prices(client), self.collect_reference(client),
+                        return_exceptions=True,
                     )
+                    for operation, result in zip(operations, results, strict=True):
+                        if isinstance(result, BaseException):
+                            self.storage.raw(
+                                f"{operation}_collection_error", self.slug,
+                                {"error": type(result).__name__},
+                            )
                     self.storage.flush()
                     await asyncio.sleep(settings.COLLECTOR_POLL_SECONDS)
             finally:
+                if 'future_preview_task' in locals() and future_preview_task is not None:
+                    future_preview_task.cancel()
+                    await asyncio.gather(future_preview_task, return_exceptions=True)
                 for task in tasks: task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
 

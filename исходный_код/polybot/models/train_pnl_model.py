@@ -16,7 +16,7 @@ import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
-    brier_score_loss, mean_absolute_error, mean_squared_error, r2_score, roc_auc_score,
+    average_precision_score, brier_score_loss, mean_absolute_error, mean_squared_error, r2_score, roc_auc_score,
 )
 
 from polybot.models.counterfactual_actions import ACTION_FEATURE_NAMES, action_vector
@@ -238,6 +238,7 @@ def train(path: Path, artifact_path: Path | None = None, report_path: Path | Non
         "train_fill_rate": float(filled[train_mask].mean()), "test_fill_rate": float(test_labels.mean()),
         "fill_model": {
             "roc_auc": float(roc_auc_score(test_labels, test_p_fill)),
+            "pr_auc": float(average_precision_score(test_labels, test_p_fill)),
             "brier": float(brier_score_loss(test_labels, test_p_fill)),
         },
         "conditional_pnl_model": {
@@ -245,6 +246,7 @@ def train(path: Path, artifact_path: Path | None = None, report_path: Path | Non
             "mae": float(mean_absolute_error(pnl[filled_test], test_conditional[filled[test_mask] == 1])),
             "rmse": float(mean_squared_error(pnl[filled_test], test_conditional[filled[test_mask] == 1]) ** 0.5),
             "outcome_roc_auc": float(roc_auc_score(resolution[filled_test], test_p_win)),
+            "outcome_pr_auc": float(average_precision_score(resolution[filled_test], test_p_win)),
             "outcome_brier": float(brier_score_loss(resolution[filled_test], test_p_win)),
             "target": "calibrated_P(contract_wins|filled), converted to net PnL by payout and fee formula",
         },

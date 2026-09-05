@@ -116,6 +116,7 @@ def _llm_context(state: MarketState, position: PositionState | None) -> dict[str
         "remaining_seconds": round(state.remaining_seconds, 1),
         "realized_volatility_60s_pct": round(state.realized_volatility_60s_pct, 6),
         "target_distance_lags_pct": state.target_distance_lags_pct,
+        "completed_event_history": state.history_features,
         "external_prices": {key: round(value, 4) for key, value in state.source_prices.items()},
         "external_returns_pct": {key: round(value, 5) for key, value in state.source_returns_pct.items()},
         "source_disagreement_pct": round(state.source_disagreement_pct, 5),
@@ -281,7 +282,7 @@ def _from_signal(
                 f"Ступень {next_stage}/5: P({position.outcome}) упала до {held_probability:.1%} и цена на "
                 f"противоположной стороне Price to Beat; {market_context}"
                 + (f"; модель: {llm_reason}" if llm_reason else ""),
-                [*tags, "five_stage_exit", "staged_risk_exit", "held_direction_exit", "reversal_exit", "flip_disabled"],
+                [*tags, "five_stage_exit", "staged_risk_exit", "held_direction_exit", "reversal_exit", "flip_disabled", "limit_exit"],
                 exit_fraction=stage_fraction,
             )
         return Decision(
@@ -293,10 +294,13 @@ def _from_signal(
 
     if direction not in {"Up", "Down"}:
         return Decision("WAIT", confidence, "Модель не выбрала направление", [*tags, "model_hold"])
-    if state.elapsed_seconds < settings.PAPER_MIN_ENTRY_SECONDS_AFTER_OPEN:
-        return Decision("WAIT", confidence, "Недостаточно истории внутри события", [*tags, "early_noise_window"])
-    if state.remaining_seconds < settings.PAPER_LAST_ENTRY_SECONDS_BEFORE_CLOSE:
-        return Decision("WAIT", confidence, "Поздно для нового входа", [*tags, "late_entry_block"])
+    if state.remaining_seconds <= 0:
+        return Decision("WAIT", confidence, "Событие уже завершено", [*tags, "event_ended"])
+    if settings.MODEL_TIME_GATES_ENABLED:
+        if state.elapsed_seconds < settings.PAPER_MIN_ENTRY_SECONDS_AFTER_OPEN:
+            return Decision("WAIT", confidence, "Недостаточно истории внутри события", [*tags, "early_noise_window"])
+        if state.remaining_seconds < settings.PAPER_LAST_ENTRY_SECONDS_BEFORE_CLOSE:
+            return Decision("WAIT", confidence, "Поздно для нового входа", [*tags, "late_entry_block"])
     # Модель входа единолично определяет сторону Price to Beat. Денежная модель
     # может отклонить вход или изменить размер, но не имеет права незаметно
     # заменить Down на Up (и наоборот) из-за иной ask-цены контракта.
@@ -339,7 +343,24 @@ def _from_signal(
     base_expected_pnl, value_parts = expected_pnl(
         state, direction, probabilities[direction], ask, settings.PAPER_ENTRY_NOTIONAL_USDC,
     )
-    notional = position_notional(edge, base_expected_pnl)
+    notional = position_notional(
+        edge, base_expected_pnl,
+        win_probability=probabilities[direction], entry_price=ask,
+        fill_probability=value_parts.get("fill_probability"),
+    )
+    minimum_shares = max(
+        float(state.minimum_order_size or 0.0),
+        float(settings.DEFAULT_CLOB_MIN_ORDER_SIZE_SHARES),
+    )
+    minimum_notional = max(float(settings.POSITION_SIZE_MIN_USDC), minimum_shares * ask)
+    if notional > 0:
+        notional = min(
+            max(float(notional), minimum_notional),
+            float(settings.PAPER_MAX_EVENT_EXPOSURE_USDC),
+            float(settings.MAX_POSITION_USDC),
+        )
+    if notional + 1e-9 < minimum_notional:
+        notional = 0.0
     tags.extend([
         f"action_value={base_expected_pnl:.5f}",
         f"analytical_value={float(value_parts['analytical']):.5f}",

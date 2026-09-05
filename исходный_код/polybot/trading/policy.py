@@ -31,6 +31,12 @@ class MarketState:
     realized_volatility_60s_pct: float = 0.0
     target_distance_lags_pct: dict[str, float] = field(default_factory=dict)
     history_features: dict[str, float] = field(default_factory=dict)
+    fees_enabled: bool = True
+    fee_rate: float = settings.POLYMARKET_CRYPTO_TAKER_FEE_RATE
+    fee_exponent: float = 1.0
+    fee_taker_only: bool = True
+    minimum_order_size: float = 0.0
+    tick_size: float = 0.01
 
     @property
     def distance_to_target_usd(self) -> float | None:
@@ -98,6 +104,10 @@ class PositionState:
     average_price: float
     current_bid: float | None
     exit_stage: int = 0
+    opened_at: str | None = None
+    original_shares: float | None = None
+    original_cost_usdc: float | None = None
+    exit_features: dict[str, float] = field(default_factory=dict)
 
     @property
     def unrealized_pnl(self) -> float:
@@ -177,10 +187,13 @@ def decide(state: MarketState, position: PositionState | None = None) -> Decisio
             )
         return Decision("HOLD", confidence, "Позиция сохраняется; условий выхода или добавления нет", tags)
 
-    if state.elapsed_seconds < settings.PAPER_MIN_ENTRY_SECONDS_AFTER_OPEN:
-        return Decision("WAIT", confidence, "Слишком рано: ждём формирование устойчивого сигнала", ["early_noise_window"])
-    if state.remaining_seconds < settings.PAPER_LAST_ENTRY_SECONDS_BEFORE_CLOSE:
-        return Decision("WAIT", confidence, "Для нового входа осталось слишком мало времени", ["late_entry_block"])
+    if state.remaining_seconds <= 0:
+        return Decision("WAIT", confidence, "Событие уже завершено", ["event_ended"])
+    if settings.MODEL_TIME_GATES_ENABLED:
+        if state.elapsed_seconds < settings.PAPER_MIN_ENTRY_SECONDS_AFTER_OPEN:
+            return Decision("WAIT", confidence, "Слишком рано: ждём формирование устойчивого сигнала", ["early_noise_window"])
+        if state.remaining_seconds < settings.PAPER_LAST_ENTRY_SECONDS_BEFORE_CLOSE:
+            return Decision("WAIT", confidence, "Для нового входа осталось слишком мало времени", ["late_entry_block"])
     if abs(move) < settings.PAPER_MIN_BTC_MOVE_PCT:
         return Decision("WAIT", confidence, "Движение BTC недостаточно сильное", ["weak_signal"])
     if confidence < settings.MIN_ENTRY_CONFIDENCE:

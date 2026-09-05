@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import app_config as settings
 import joblib
 import numpy as np
 import pyarrow.parquet as pq
 from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
-from sklearn.metrics import brier_score_loss, precision_score, roc_auc_score
+from sklearn.metrics import average_precision_score, brier_score_loss, precision_score, roc_auc_score
 
 from polybot.models.artifact_versions import save_version_bundle
 
@@ -18,13 +19,17 @@ from polybot.models.artifact_versions import save_version_bundle
 FEATURES = [
     "seconds_in_position", "remaining_seconds", "current_bid", "average_price", "marked_return",
     "oriented_distance_to_target_pct", "momentum_bid_3ticks", "momentum_distance_3ticks",
+    "momentum_bid_15s", "momentum_bid_30s", "momentum_bid_60s",
+    "bid_slope_15s", "bid_slope_30s", "target_distance_available",
     "peak_bid_since_entry", "trough_bid_since_entry", "drawdown_from_peak", "recovery_from_trough",
+    "seconds_since_peak", "maximum_favorable_excursion", "maximum_adverse_excursion",
     "spread", "log_bid_size", "log_ask_size", "shares", "original_cost_usdc",
 ]
 
 
-def train() -> dict:
-    rows = pq.read_table(settings.EXIT_SEQUENCE_DATASET_PATH).to_pylist()
+def train(dataset_path: Path | None = None, output_dir: Path | None = None) -> dict:
+    dataset_path = dataset_path or settings.EXIT_SEQUENCE_DATASET_PATH
+    rows = pq.read_table(dataset_path).to_pylist()
     # Не даём событиям с большим числом тиков доминировать и оставляем примерно один кадр в 5 секунд.
     sampled = [row for row in rows if int(float(row["seconds_in_position"])) % 5 == 0]
     events = list(dict.fromkeys(str(row["event_slug"]) for row in sampled))
@@ -32,7 +37,11 @@ def train() -> dict:
     split = {event: ("train" if i < train_end else "validation" if i < validation_end else "test")
              for i, event in enumerate(events)}
     x = np.asarray([[float(row.get(name) or 0) for name in FEATURES] for row in sampled], dtype=float)
-    y = np.asarray([float(row["close_advantage_usdc"]) for row in sampled], dtype=float)
+    # Строгая контрфактуальная цель: закрыться сейчас стоит лишь тогда, когда это
+    # лучше не только HOLD до resolution, но и доступного более позднего выхода.
+    # Будущее используется только как supervised label, но не попадает в features.
+    target_name = "close_advantage_vs_best_wait_usdc"
+    y = np.asarray([float(row[target_name]) for row in sampled], dtype=float)
     slugs = np.asarray([str(row["event_slug"]) for row in sampled])
     outcomes = np.asarray([str(row["outcome"]) for row in sampled])
     names = np.asarray([split[slug] for slug in slugs])
@@ -50,23 +59,55 @@ def train() -> dict:
         min_samples_leaf=30, random_state=43,
     ).fit(x[masks["train"]], y[masks["train"]], sample_weight=weights)
 
+    def policy_metrics(name: str, probability_threshold: float, advantage_threshold: float) -> dict:
+        mask_indices = np.flatnonzero(masks[name])
+        probability = classifier.predict_proba(x[mask_indices])[:, 1]
+        predicted_advantage = regressor.predict(x[mask_indices])
+        grouped: dict[tuple[str, int], list[tuple[int, float, float]]] = {}
+        for local_index, global_index in enumerate(mask_indices.tolist()):
+            row = sampled[global_index]
+            key = (str(row.get("source", "paper")), int(row["position_id"]))
+            grouped.setdefault(key, []).append((global_index, float(probability[local_index]), float(predicted_advantage[local_index])))
+        policy_pnl: list[float] = []
+        hold_pnl: list[float] = []
+        realised_advantage: list[float] = []
+        selected_outcomes: list[str] = []
+        for candidates in grouped.values():
+            candidates.sort(key=lambda item: str(sampled[item[0]]["observed_at"]))
+            last = sampled[candidates[-1][0]]
+            baseline = float(last["hold_pnl_usdc"])
+            selected = next((item for item in candidates if item[1] >= probability_threshold and item[2] >= advantage_threshold), None)
+            if selected is None:
+                realised = baseline
+            else:
+                selected_row = sampled[selected[0]]
+                realised = float(selected_row["close_now_pnl_usdc"])
+                realised_advantage.append(realised - baseline)
+                selected_outcomes.append(str(selected_row["outcome"]))
+            policy_pnl.append(realised); hold_pnl.append(baseline)
+        advantages = np.asarray(policy_pnl) - np.asarray(hold_pnl)
+        return {
+            "positions": len(grouped), "closes": len(realised_advantage),
+            "close_precision": float(np.mean(np.asarray(realised_advantage) >= margin)) if realised_advantage else 0.0,
+            "policy_pnl_usdc": float(np.sum(policy_pnl)), "hold_pnl_usdc": float(np.sum(hold_pnl)),
+            "advantage_vs_hold_usdc": float(np.sum(advantages)),
+            "selected_advantage_mean_usdc": float(np.mean(realised_advantage)) if realised_advantage else 0.0,
+            "up_closes": selected_outcomes.count("Up"), "down_closes": selected_outcomes.count("Down"),
+        }
+
     validation_probability = classifier.predict_proba(x[masks["validation"]])[:, 1]
     validation_advantage = regressor.predict(x[masks["validation"]])
-    validation_truth = y[masks["validation"]]
     policies = []
     for probability_threshold in np.arange(.55, .96, .05):
-        for advantage_threshold in np.arange(margin, 1.51, .10):
-            selected = (validation_probability >= probability_threshold) & (validation_advantage >= advantage_threshold)
-            truth = validation_truth[selected]
+        for advantage_threshold in np.arange(-.25, 1.51, .10):
+            result = policy_metrics("validation", float(probability_threshold), float(advantage_threshold))
             policies.append({
                 "probability_threshold": float(probability_threshold),
-                "advantage_threshold": float(advantage_threshold), "closes": int(selected.sum()),
-                "precision": float((truth >= margin).mean()) if len(truth) else 0.0,
-                "advantage_sum_usdc": float(truth.sum()) if len(truth) else 0.0,
+                "advantage_threshold": float(advantage_threshold), **result,
             })
-    eligible = [p for p in policies if p["closes"] >= 25 and p["precision"] >= .60 and p["advantage_sum_usdc"] > 0]
-    shadow_policy = max(policies, key=lambda p: (p["advantage_sum_usdc"], p["precision"]))
-    policy = max(eligible or policies, key=lambda p: (p["advantage_sum_usdc"] if p["closes"] >= 25 else -1e9, p["precision"]))
+    eligible = [p for p in policies if p["closes"] >= 15 and p["close_precision"] >= .70 and p["advantage_vs_hold_usdc"] > 0]
+    shadow_policy = max(policies, key=lambda p: (p["advantage_vs_hold_usdc"], p["close_precision"]))
+    policy = max(eligible or policies, key=lambda p: (p["advantage_vs_hold_usdc"] if p["closes"] >= 20 else -1e9, p["close_precision"]))
     if not eligible:
         policy = {**policy, "probability_threshold": 1.01, "advantage_threshold": float("inf")}
 
@@ -74,34 +115,33 @@ def train() -> dict:
         mask = masks[name]
         probability = classifier.predict_proba(x[mask])[:, 1]
         advantage = regressor.predict(x[mask])
-        selected = ((probability >= policy["probability_threshold"])
-                    & (advantage >= policy["advantage_threshold"]))
         truth, binary = y[mask], label[mask]
-        return {
-            "rows": int(mask.sum()), "events": len(set(slugs[mask])), "closes": int(selected.sum()),
-            "close_precision": float(precision_score(binary, selected, zero_division=0)),
-            "selected_advantage_sum_usdc": float(truth[selected].sum()) if selected.any() else 0.0,
-            "selected_advantage_mean_usdc": float(truth[selected].mean()) if selected.any() else 0.0,
+        result = policy_metrics(name, float(policy["probability_threshold"]), float(policy["advantage_threshold"]))
+        return {**result,
+            "rows": int(mask.sum()), "events": len(set(slugs[mask])),
             "roc_auc": float(roc_auc_score(binary, probability)) if len(set(binary)) == 2 else None,
+            "pr_auc": float(average_precision_score(binary, probability)) if len(set(binary)) == 2 else None,
             "brier": float(brier_score_loss(binary, probability)),
             "up_rows": int((outcomes[mask] == "Up").sum()), "down_rows": int((outcomes[mask] == "Down").sum()),
         }
 
     report = {
-        "schema_version": 1, "created_at": datetime.now(UTC).isoformat(),
-        "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
+        "schema_version": 5, "created_at": datetime.now(UTC).isoformat(),
+        "target": target_name,
+        "decision_semantics": "first causal CLOSE_NOW trigger versus best of later exit and HOLD, evaluated after fees",
         "features": FEATURES, "rows": len(sampled), "events": len(events), "selected_policy": policy,
         "shadow_policy": shadow_policy,
         "train": metrics("train"), "validation": metrics("validation"), "test": metrics("test"),
     }
     test = report["test"]
     report["promotion_gate"] = {"passed": bool(test["events"] >= 30 and test["closes"] >= 20
-        and test["close_precision"] >= .60 and test["selected_advantage_sum_usdc"] > 0),
+        and test["close_precision"] >= .60 and test["advantage_vs_hold_usdc"] > 0
+        and test["up_closes"] >= 5 and test["down_closes"] >= 5),
         "candidate_only": True}
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    directory = settings.MODEL_DIR / "candidates" / f"exit_sequence_v14_{stamp}"
+    directory = output_dir or settings.MODEL_DIR / "candidates" / f"exit_sequence_v20_{stamp}"
     directory.mkdir(parents=True, exist_ok=True)
-    artifact = directory / "exit_sequence_v14.joblib"
+    artifact = directory / "exit_sequence_v20.joblib"
     report_path = directory / "exit_sequence_report.json"
     joblib.dump({"close_classifier": classifier, "advantage_model": regressor, "features": FEATURES,
                  "probability_threshold": policy["probability_threshold"],
@@ -109,8 +149,10 @@ def train() -> dict:
                  "shadow_probability_threshold": shadow_policy["probability_threshold"],
                  "shadow_advantage_threshold": shadow_policy["advantage_threshold"], "report": report}, artifact)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    version = save_version_bundle("exit_sequence", "exit", [artifact, report_path], report)
-    report.update({"artifact_version": version["version"], "artifact_path": str(artifact), "report_path": str(report_path)})
+    if output_dir is None:
+        version = save_version_bundle("exit_sequence_v20", "exit", [artifact, report_path], report)
+        report["artifact_version"] = version["version"]
+    report.update({"artifact_path": str(artifact), "report_path": str(report_path)})
     return report
 
 

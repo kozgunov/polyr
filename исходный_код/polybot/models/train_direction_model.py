@@ -12,7 +12,7 @@ import joblib
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, brier_score_loss, log_loss, roc_auc_score
+from sklearn.metrics import accuracy_score, average_precision_score, balanced_accuracy_score, brier_score_loss, log_loss, roc_auc_score
 
 from polybot.models.artifact_versions import save_version_bundle
 from polybot.models.event_history import build_summaries, context as history_context, feature_names as history_feature_names
@@ -130,6 +130,7 @@ def train(
         "raw_log_loss": float(log_loss(y[test_mask], raw_probability, labels=[0, 1])),
         "balanced_accuracy": float(balanced_accuracy_score(y[test_mask], prediction)),
         "roc_auc": float(roc_auc_score(y[test_mask], probability)) if len(set(y[test_mask])) == 2 else 0.0,
+        "pr_auc": float(average_precision_score(y[test_mask], probability)) if len(set(y[test_mask])) == 2 else 0.0,
         "production_ready": len(events) >= settings.TRAINING_MIN_INDEPENDENT_EVENTS,
     }
     artifact_path = artifact_path or settings.TRAINING_ARTIFACT_PATH

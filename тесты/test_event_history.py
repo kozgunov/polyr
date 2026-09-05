@@ -25,6 +25,8 @@ def test_neighbor_context_uses_only_completed_past_events():
     assert before_previous_end["history_3_available_fraction"] == 0
     assert after_previous_end["history_3_available_fraction"] == 1 / 3
     assert after_previous_end["history_3_up_rate"] == 1.0
+    assert "history_3_mean_distance_at_240s_pct" in after_previous_end
+    assert "history_3_mean_target_crossings" in after_previous_end
 
 
 def test_legacy_vector_schema_stays_compatible():

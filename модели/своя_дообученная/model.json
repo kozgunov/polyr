@@ -1,0 +1,56 @@
+{
+  "active_tandem_version": "v16",
+  "entry_model": "custom_entry_v0018",
+  "exit_direction_model": "catboost_entry_v0015",
+  "exit_policy": "CatBoost held-outcome probability + promoted learned exit artifact or analytical CLOSE-vs-HOLD fallback",
+  "activated_at": "2026-08-15T15:31:16.108680+00:00",
+  "custom_metrics": {
+    "independent_events": 1942,
+    "train_events": 1165,
+    "calibration_events": 388,
+    "test_events": 389,
+    "rows": 172225,
+    "accuracy": 0.8168336191077821,
+    "brier": 0.12438749051552793,
+    "log_loss": 0.3778487366007224,
+    "raw_brier": 0.12437133250053992,
+    "raw_log_loss": 0.3777861562890289,
+    "balanced_accuracy": 0.8168335818412212,
+    "roc_auc": 0.907052429299404,
+    "production_ready": true
+  },
+  "catboost_metrics": {
+    "independent_events": 1942,
+    "train_events": 1165,
+    "calibration_events": 388,
+    "test_events": 389,
+    "rows": 172225,
+    "accuracy": 0.8163823962939566,
+    "brier": 0.12433313147154874,
+    "log_loss": 0.37792941730165636,
+    "raw_brier": 0.1243247901910436,
+    "raw_log_loss": 0.3778807977583134,
+    "balanced_accuracy": 0.8163824377531049,
+    "roc_auc": 0.9072743120747166,
+    "production_ready": true
+  },
+  "post_champion_evaluation": {
+    "events": 205,
+    "custom_v0014": {
+      "roc_auc": 0.8996014532715298,
+      "brier": 0.13018978266652156
+    },
+    "custom_v0018": {
+      "roc_auc": 0.8998580397233358,
+      "brier": 0.12916396778797512
+    },
+    "catboost_v0011": {
+      "roc_auc": 0.8996504979203733,
+      "brier": 0.12996327421022374
+    },
+    "catboost_v0015": {
+      "roc_auc": 0.9006662496770991,
+      "brier": 0.12873978152792978
+    }
+  }
+}

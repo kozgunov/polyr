@@ -1,5 +1,5 @@
 from pathlib import Path
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from polybot.trading.paper_engine import PaperEngine
@@ -25,6 +25,41 @@ def test_signal_must_persist_before_execution(tmp_path: Path, monkeypatch: pytes
     engine.close()
 
 
+def test_entry_grid_respects_model_budget_clob_minimum_and_better_prices() -> None:
+    plan = PaperEngine._entry_grid_plan(10.0, 0.69, 0.01, 5.0)
+    assert [price for price, _ in plan] == [0.66, 0.63, 0.60]
+    assert sum(notional for _, notional in plan) == pytest.approx(10.0)
+    assert all(notional >= 1.0 and notional / price >= 5.0 for price, notional in plan)
+
+
+def test_entry_grid_does_not_increase_small_model_position() -> None:
+    assert PaperEngine._entry_grid_plan(3.0, 0.69, 0.01, 5.0) == []
+
+
+def test_three_losses_pause_same_session_for_thirty_minutes(tmp_path: Path) -> None:
+    engine = PaperEngine(tmp_path / "paper.sqlite3")
+    for index in range(3):
+        engine.db.execute(
+            """INSERT INTO paper_positions(session_id,event_slug,token_id,outcome,status,opened_at,
+               average_price,shares,cost_usdc,closed_at,realized_pnl_usdc,execution_valid)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,1)""",
+            (engine.session_id, f"btc-updown-5m-{4102440000 + index * 300}", f"token-{index}",
+             "Up", "resolved", f"2026-01-01T00:0{index}:00+00:00", 0.5, 2.0, 1.0,
+             f"2026-01-01T00:0{index}:30+00:00", -1.0),
+        )
+    engine.db.commit()
+
+    assert engine._enforce_loss_streak() is True
+    status = engine.db.execute(
+        "SELECT status,consecutive_losses FROM paper_sessions WHERE session_id=?", (engine.session_id,)
+    ).fetchone()
+    assert tuple(status) == ("paused", 3)
+    until = datetime.fromisoformat(engine._control("paper_cooldown_until", ""))
+    remaining = (until - datetime.now(UTC)).total_seconds()
+    assert 29 * 60 < remaining <= 30 * 60
+    engine.close()
+
+
 def test_new_session_archives_history_and_resets_budget(tmp_path: Path) -> None:
     engine = PaperEngine(tmp_path / "paper.sqlite3")
     previous = engine.session_id
@@ -44,6 +79,119 @@ def test_new_session_archives_history_and_resets_budget(tmp_path: Path) -> None:
     engine.close()
 
 
+def test_preopen_shadow_order_is_replaced_without_deleting_history(tmp_path: Path) -> None:
+    engine = PaperEngine(tmp_path / "paper.sqlite3")
+    next_slug = "btc-updown-5m-4102444800"
+    engine._upsert_preopen_shadow_order(1, "source", next_slug, "Up", "up", .40, 2.0, .75)
+    engine._upsert_preopen_shadow_order(2, "source", next_slug, "Down", "down", .35, 3.0, .80)
+    rows = engine.db.execute(
+        "SELECT outcome,status FROM shadow_preopen_orders WHERE next_event_slug=? ORDER BY id",
+        (next_slug,),
+    ).fetchall()
+    assert [tuple(row) for row in rows] == [("Up", "cancelled_replaced"), ("Down", "working")]
+    engine.close()
+
+
+def _ended_event_with_quotes(engine: PaperEngine, held_bid: float, held_ask: float) -> tuple[int, str]:
+    end_epoch = int(datetime.now(UTC).timestamp()) - 11
+    slug = f"btc-updown-5m-{end_epoch - 300}"
+    engine.db.execute(
+        """CREATE TABLE IF NOT EXISTS market_snapshots(
+           id INTEGER PRIMARY KEY,event_slug TEXT,outcome TEXT,best_bid REAL,best_ask REAL,collected_at TEXT)"""
+    )
+    quote_at = datetime.fromtimestamp(end_epoch, UTC) - timedelta(seconds=1)
+    engine.db.execute(
+        "INSERT INTO market_snapshots(event_slug,outcome,best_bid,best_ask,collected_at) VALUES(?,?,?,?,?)",
+        (slug, "Up", held_bid, held_ask, quote_at.isoformat()),
+    )
+    engine.db.execute(
+        "INSERT INTO market_snapshots(event_slug,outcome,best_bid,best_ask,collected_at) VALUES(?,?,?,?,?)",
+        (slug, "Down", max(0.0, 1.0 - held_ask), min(1.0, 1.0 - held_bid), quote_at.isoformat()),
+    )
+    cursor = engine.db.execute(
+        """INSERT INTO paper_positions(session_id,event_slug,token_id,outcome,status,opened_at,
+           average_price,shares,cost_usdc) VALUES(?,?,?,?,?,?,?,?,?)""",
+        (engine.session_id, slug, "up", "Up", "open",
+         datetime.fromtimestamp(end_epoch - 300, UTC).isoformat(), .80, 5.0, 4.0),
+    )
+    engine.db.execute(
+        "UPDATE paper_sessions SET cash_balance_usdc=296.0 WHERE session_id=?", (engine.session_id,),
+    )
+    engine.db.commit()
+    return int(cursor.lastrowid), slug
+
+
+def test_post_event_extreme_quote_provisionally_releases_paper_position(tmp_path: Path) -> None:
+    engine = PaperEngine(tmp_path / "paper.sqlite3")
+    position_id, _ = _ended_event_with_quotes(engine, .99, 1.0)
+    engine._provisionally_settle_ended_paper_positions()
+    position = engine.db.execute(
+        "SELECT status,close_price,provisional_label,realized_pnl_usdc FROM paper_positions WHERE id=?",
+        (position_id,),
+    ).fetchone()
+    session = engine.db.execute(
+        "SELECT cash_balance_usdc,realized_pnl_usdc FROM paper_sessions WHERE session_id=?",
+        (engine.session_id,),
+    ).fetchone()
+    assert tuple(position) == ("provisionally_resolved", 1.0, 1, 1.0)
+    assert tuple(session) == (301.0, 1.0)
+    engine.close()
+
+
+def test_post_event_non_extreme_quote_waits_for_official_resolution(tmp_path: Path) -> None:
+    engine = PaperEngine(tmp_path / "paper.sqlite3")
+    position_id, _ = _ended_event_with_quotes(engine, .96, .97)
+    engine._provisionally_settle_ended_paper_positions()
+    status = engine.db.execute("SELECT status FROM paper_positions WHERE id=?", (position_id,)).fetchone()[0]
+    assert status == "open"
+    engine.close()
+
+
+def test_official_resolution_reconciles_provisional_mismatch(tmp_path: Path) -> None:
+    engine = PaperEngine(tmp_path / "paper.sqlite3")
+    position_id, slug = _ended_event_with_quotes(engine, .99, 1.0)
+    engine._provisionally_settle_ended_paper_positions()
+    engine.db.execute(
+        """CREATE TABLE training_examples(
+           id INTEGER PRIMARY KEY,event_slug TEXT,outcome TEXT,token_id TEXT,label INTEGER)"""
+    )
+    engine.db.execute(
+        "INSERT INTO event_resolutions(event_slug,outcome,token_id,label,resolved_at,source) VALUES(?,?,?,?,?,?)",
+        (slug, "Up", "up", 0, datetime.now(UTC).isoformat(), "test_official"),
+    )
+    engine.db.commit()
+    engine.settle_resolved()
+    position = engine.db.execute(
+        "SELECT status,close_price,official_label,provisional_mismatch,realized_pnl_usdc FROM paper_positions WHERE id=?",
+        (position_id,),
+    ).fetchone()
+    session = engine.db.execute(
+        "SELECT cash_balance_usdc,realized_pnl_usdc FROM paper_sessions WHERE session_id=?",
+        (engine.session_id,),
+    ).fetchone()
+    assert tuple(position) == ("resolved", 0.0, 0, 1, -4.0)
+    assert tuple(session) == (296.0, -4.0)
+    engine.close()
+
+
+def test_unsettled_previous_event_does_not_mask_current_event_position(tmp_path: Path) -> None:
+    engine = PaperEngine(tmp_path / "paper.sqlite3")
+    current = market_state()
+    previous_slug = current.event_slug.rsplit("-", 1)[0] + "-" + str(int(current.event_slug.rsplit("-", 1)[1]) - 300)
+    for slug, outcome in ((previous_slug, "Down"), (current.event_slug, "Up")):
+        engine.db.execute(
+            """INSERT INTO paper_positions(session_id,event_slug,token_id,outcome,status,opened_at,
+               average_price,shares,cost_usdc) VALUES(?,?,?,?,?,?,?,?,?)""",
+            (engine.session_id, slug, f"{slug}-token", outcome, "open", current.observed_at, .7, 2, 1.4),
+        )
+    engine.db.commit()
+    position = engine.open_position(current)
+    assert position is not None
+    assert position.event_slug == current.event_slug
+    assert position.outcome == "Up"
+    engine.close()
+
+
 def test_risk_exit_requires_five_confirmations_and_ten_seconds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     engine = PaperEngine(tmp_path / "paper.sqlite3")
     ticks = iter((0.0, 2.0, 4.0, 6.0, 10.0))
@@ -60,6 +208,7 @@ def test_risk_exit_requires_five_confirmations_and_ten_seconds(tmp_path: Path, m
 
 def test_entry_limit_fill_has_no_adverse_slippage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("polybot.trading.paper_engine.settings.EXECUTION_SIMULATION_ENABLED", False)
+    monkeypatch.setattr("polybot.trading.paper_engine.settings.ENTRY_GRID_ENABLED", False)
     engine = PaperEngine(tmp_path / "paper.sqlite3")
     current = market_state()
     current.book_json["Up"]["token_id"] = "up-token"

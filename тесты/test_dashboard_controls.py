@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
@@ -36,7 +37,7 @@ def test_dashboard_buttons_have_working_local_endpoints(tmp_path: Path, monkeypa
 def test_dashboard_html_contains_every_primary_control() -> None:
     html = dashboard.STATIC_DIR.joinpath("index.html").read_text(encoding="utf-8")
     for control_id in (
-        "modeToggle", "applyLiveScale", "stopTrading", "resumeTrading", "newPaperRun",
+        "modeToggle", "applyLiveScale", "stopTrading", "resumeTrading", "manualUnlock", "newPaperRun",
         "applyEntryModel", "applyExitModel", "refreshNow", "exportNow", "loadTrade", "loadTable",
     ):
         assert f'id="{control_id}"' in html
@@ -85,3 +86,64 @@ def test_live_mode_overview_uses_live_positions_not_paper(tmp_path: Path, monkey
     assert payload["active_trading"]["source"] == "live"
     assert len(payload["active_trading"]["open_positions"]) == 1
     assert payload["active_trading"]["unrealized_pnl"] == 1.0
+
+
+def test_manual_unlock_resumes_same_paper_session_only_when_runtime_is_healthy(
+    tmp_path: Path, monkeypatch
+) -> None:
+    database = tmp_path / "dashboard-unlock.sqlite3"
+    engine = PaperEngine(database)
+    now = datetime.now(UTC).isoformat()
+    for key, value in (
+        ("trading_mode", "paper"),
+        ("validation_status", "healthy"),
+        ("engine_heartbeat", "alive"),
+        ("engine_state", "paused"),
+    ):
+        engine.db.execute(
+            "INSERT OR REPLACE INTO runtime_controls VALUES(?,?,?,?)",
+            (key, value, now, "test"),
+        )
+    engine.db.commit()
+    session_id = engine.session_id
+    engine.close()
+    monkeypatch.setattr(dashboard.settings, "DATABASE_PATH", database)
+
+    response = TestClient(dashboard.app).post(
+        "/api/trading-control", json={"action": "manual_unlock"}
+    )
+
+    assert response.status_code == 200
+    with dashboard.connect() as connection:
+        assert dashboard.runtime_control(connection, "engine_state", "") == "running"
+        assert "cooldown unlock" in (dashboard.runtime_control_reason(connection, "engine_state") or "")
+        session = connection.execute(
+            "SELECT session_id,status FROM paper_sessions ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        assert tuple(session) == (session_id, "running")
+
+
+def test_manual_unlock_never_bypasses_live_or_degraded_validation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    database = tmp_path / "dashboard-unlock-blocked.sqlite3"
+    engine = PaperEngine(database)
+    now = datetime.now(UTC).isoformat()
+    for key, value in (
+        ("trading_mode", "live"),
+        ("validation_status", "degraded"),
+        ("engine_heartbeat", "alive"),
+    ):
+        engine.db.execute(
+            "INSERT OR REPLACE INTO runtime_controls VALUES(?,?,?,?)",
+            (key, value, now, "test"),
+        )
+    engine.db.commit()
+    engine.close()
+    monkeypatch.setattr(dashboard.settings, "DATABASE_PATH", database)
+
+    response = TestClient(dashboard.app).post(
+        "/api/trading-control", json={"action": "manual_unlock"}
+    )
+
+    assert response.status_code == 409

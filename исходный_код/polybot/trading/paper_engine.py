@@ -19,15 +19,17 @@ import joblib
 
 from polybot.collectors.pipeline import now
 from polybot.models.model_policy import decide_with_model
+from polybot.models.action_value import position_notional
 from polybot.models.model_registry import model_is_ready
 from polybot.models.event_history import context as event_history_context, summaries_from_connection
-from polybot.trading.fees import total_fee_usdc
+from polybot.trading.fees import net_buy_edge, state_fee_usdc, total_fee_usdc
 from polybot.trading.execution_simulator import fak_sell, limit_buy
 from polybot.trading.execution_validity import validate_entry_execution, validate_entry_state
 from polybot.trading.policy import Decision, MarketState, PositionState
 from polybot.trading.live_executor import cancel_order as cancel_live_order
 from polybot.trading.live_executor import get_order as get_live_order
 from polybot.trading.live_executor import market_minimum_size
+from polybot.trading.live_executor import summarize_order_fills
 from polybot.trading.live_executor import submit_limit_order
 
 SCHEMA = """
@@ -60,7 +62,11 @@ CREATE TABLE IF NOT EXISTS paper_orders (
   requested_price REAL, filled_price REAL, shares REAL, notional_usdc REAL,
   fee_usdc REAL NOT NULL DEFAULT 0, slippage_bps REAL NOT NULL, status TEXT NOT NULL,
   created_at TEXT NOT NULL, requested_shares REAL, requested_notional_usdc REAL,
-  last_checked_at TEXT, check_count INTEGER NOT NULL DEFAULT 0
+  last_checked_at TEXT, check_count INTEGER NOT NULL DEFAULT 0,
+  submit_best_bid REAL, submit_best_ask REAL, submit_book_timestamp TEXT,
+  fill_best_bid REAL, fill_best_ask REAL, fill_observed_at TEXT,
+  observed_slippage_bps REAL, book_age_ms_at_submit REAL, book_age_ms_at_fill REAL,
+  fill_probability_kind TEXT
   ,execution_valid INTEGER NOT NULL DEFAULT 1, invalid_reason TEXT
 );
 CREATE TABLE IF NOT EXISTS paper_equity_snapshots (
@@ -72,6 +78,11 @@ CREATE TABLE IF NOT EXISTS strategy_labels (
   decision_id INTEGER PRIMARY KEY, event_slug TEXT NOT NULL, resolved_label INTEGER,
   decision_was_correct INTEGER, realized_pnl_usdc REAL, resolution_source TEXT,
   labeled_at TEXT
+);
+CREATE TABLE IF NOT EXISTS event_resolutions (
+  event_slug TEXT NOT NULL, outcome TEXT NOT NULL, token_id TEXT,
+  label INTEGER NOT NULL, resolved_at TEXT NOT NULL, source TEXT NOT NULL,
+  PRIMARY KEY(event_slug,outcome)
 );
 CREATE TABLE IF NOT EXISTS counterfactual_entries (
   id INTEGER PRIMARY KEY, decision_id INTEGER NOT NULL, event_slug TEXT NOT NULL,
@@ -101,6 +112,27 @@ CREATE TABLE IF NOT EXISTS exit_shadow_predictions (
   hold_pnl_usdc REAL,realized_advantage_usdc REAL,status TEXT NOT NULL DEFAULT 'pending',
   evaluated_at TEXT,UNIQUE(source,position_id,policy)
 );
+CREATE TABLE IF NOT EXISTS next_event_forecasts (
+  id INTEGER PRIMARY KEY, source_event_slug TEXT NOT NULL, next_event_slug TEXT NOT NULL,
+  observed_at TEXT NOT NULL, sample_bucket INTEGER NOT NULL, seconds_to_source_end REAL,
+  current_target_distance_pct REAL, current_consensus_return_pct REAL,
+  current_realized_volatility REAL, history_features_json TEXT NOT NULL,
+  predictor_version TEXT NOT NULL, predicted_next_up_probability REAL NOT NULL,
+  predicted_direction TEXT NOT NULL, confidence REAL NOT NULL, planned_token_id TEXT,
+  planned_limit_price REAL, planned_notional_usdc REAL, planned_order_type TEXT,
+  preopen_book_available INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending',
+  next_resolved_label INTEGER, hypothetical_filled INTEGER,
+  hypothetical_fill_price REAL, hypothetical_pnl_usdc REAL, evaluated_at TEXT,
+  UNIQUE(source_event_slug,next_event_slug,sample_bucket)
+);
+CREATE TABLE IF NOT EXISTS shadow_preopen_orders (
+  id INTEGER PRIMARY KEY, forecast_id INTEGER, source_event_slug TEXT NOT NULL,
+  next_event_slug TEXT NOT NULL, outcome TEXT NOT NULL, token_id TEXT NOT NULL,
+  limit_price REAL NOT NULL, notional_usdc REAL NOT NULL, confidence REAL NOT NULL,
+  model_name TEXT NOT NULL, requested_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'working',
+  filled_at TEXT, fill_price REAL, cancelled_at TEXT, cancel_reason TEXT
+);
 CREATE TABLE IF NOT EXISTS runtime_controls (
   control_key TEXT PRIMARY KEY, control_value TEXT NOT NULL, updated_at TEXT NOT NULL,
   reason TEXT
@@ -128,14 +160,27 @@ CREATE TABLE IF NOT EXISTS live_execution_errors (
   id INTEGER PRIMARY KEY, observed_at TEXT NOT NULL, decision_id INTEGER,
   event_slug TEXT, action TEXT NOT NULL, error_type TEXT NOT NULL, detail TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS live_decision_shadow_orders (
+  id INTEGER PRIMARY KEY, decision_id INTEGER NOT NULL, live_order_id TEXT UNIQUE NOT NULL,
+  event_slug TEXT NOT NULL, outcome TEXT NOT NULL, side TEXT NOT NULL,
+  requested_price REAL NOT NULL, requested_size REAL NOT NULL, observed_at TEXT NOT NULL,
+  submit_best_bid REAL, submit_best_ask REAL, status TEXT NOT NULL DEFAULT 'submitted',
+  simulated_fill_price REAL, simulated_fill_size REAL NOT NULL DEFAULT 0,
+  live_fill_price REAL, live_fill_size REAL NOT NULL DEFAULT 0,
+  resolved_label INTEGER, paper_net_pnl_usdc REAL, live_net_pnl_usdc REAL,
+  evaluated_at TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_decisions_time ON model_decisions(observed_at);
 CREATE INDEX IF NOT EXISTS idx_decisions_event ON model_decisions(event_slug,id);
 CREATE INDEX IF NOT EXISTS idx_positions_status ON paper_positions(status,event_slug);
 CREATE INDEX IF NOT EXISTS idx_counterfactual_pending ON counterfactual_entries(status,event_slug);
 CREATE INDEX IF NOT EXISTS idx_strategy_labels_event ON strategy_labels(event_slug,decision_id);
+CREATE INDEX IF NOT EXISTS idx_event_resolutions_token ON event_resolutions(event_slug,token_id);
 CREATE INDEX IF NOT EXISTS idx_action_cf_pending ON action_counterfactuals(status,event_slug,horizon_seconds);
 CREATE INDEX IF NOT EXISTS idx_shadow_pending ON shadow_predictions(status,event_slug,model_name);
 CREATE INDEX IF NOT EXISTS idx_exit_shadow_pending ON exit_shadow_predictions(status,event_slug,policy);
+CREATE INDEX IF NOT EXISTS idx_next_event_forecast_pending ON next_event_forecasts(status,next_event_slug);
+CREATE INDEX IF NOT EXISTS idx_preopen_orders_active ON shadow_preopen_orders(status,next_event_slug,id);
 CREATE INDEX IF NOT EXISTS idx_live_orders_status ON live_orders(status,event_slug);
 CREATE INDEX IF NOT EXISTS idx_live_positions_status ON live_positions(status,event_slug);
 """
@@ -158,6 +203,11 @@ class PaperEngine:
         self.db.executescript(SCHEMA)
         if self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='training_examples'").fetchone():
             self.db.execute("CREATE INDEX IF NOT EXISTS idx_training_event_outcome ON training_examples(event_slug,outcome)")
+        if self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='market_snapshots'").fetchone():
+            self.db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_market_event_outcome_time "
+                "ON market_snapshots(event_slug,outcome,collected_at)"
+            )
         self._migrate()
         self.db.commit()
         self.session_id = self._session()
@@ -171,6 +221,8 @@ class PaperEngine:
         self.confirmation_started = 0.0
         self._history_slug: str | None = None
         self._history_features: dict[str, float] = {}
+        self.validation_bad_cycles = 0
+        self.last_next_forecast_at = 0.0
         self.exit_shadow_artifact = (
             joblib.load(settings.EXIT_SEQUENCE_SHADOW_ARTIFACT_PATH)
             if settings.EXIT_SEQUENCE_SHADOW_ARTIFACT_PATH.exists() else None
@@ -190,6 +242,11 @@ class PaperEngine:
                 "had_early_exit": "INTEGER NOT NULL DEFAULT 0",
                 "early_exit_pnl_usdc": "REAL NOT NULL DEFAULT 0",
                 "execution_valid": "INTEGER NOT NULL DEFAULT 1", "invalid_reason": "TEXT",
+                "resolution_labeled_at": "TEXT", "settlement_latency_seconds": "REAL",
+                "provisional_resolution": "INTEGER NOT NULL DEFAULT 0",
+                "provisional_label": "INTEGER", "provisional_resolved_at": "TEXT",
+                "provisional_source": "TEXT", "official_label": "INTEGER",
+                "official_reconciled_at": "TEXT", "provisional_mismatch": "INTEGER",
             },
             "paper_orders": {
                 "expiration_at": "TEXT", "price_cap": "REAL", "fill_probability": "REAL",
@@ -197,6 +254,10 @@ class PaperEngine:
                 "requested_shares": "REAL", "requested_notional_usdc": "REAL",
                 "last_checked_at": "TEXT", "check_count": "INTEGER NOT NULL DEFAULT 0",
                 "execution_valid": "INTEGER NOT NULL DEFAULT 1", "invalid_reason": "TEXT",
+                "submit_best_bid": "REAL", "submit_best_ask": "REAL", "submit_book_timestamp": "TEXT",
+                "fill_best_bid": "REAL", "fill_best_ask": "REAL", "fill_observed_at": "TEXT",
+                "observed_slippage_bps": "REAL", "book_age_ms_at_submit": "REAL",
+                "book_age_ms_at_fill": "REAL", "fill_probability_kind": "TEXT",
             },
             "model_decisions": {"predicted_up_probability": "REAL", "predicted_down_probability": "REAL", "expected_net_edge": "REAL"},
             "live_positions": {
@@ -204,8 +265,15 @@ class PaperEngine:
                 "had_early_exit": "INTEGER NOT NULL DEFAULT 0",
                 "early_exit_pnl_usdc": "REAL NOT NULL DEFAULT 0",
                 "execution_valid": "INTEGER NOT NULL DEFAULT 1", "invalid_reason": "TEXT",
+                "resolution_labeled_at": "TEXT", "settlement_latency_seconds": "REAL",
+                "fees_usdc": "REAL NOT NULL DEFAULT 0", "gross_pnl_usdc": "REAL",
+                "mark_price_updated_at": "TEXT", "ledger_validated": "INTEGER NOT NULL DEFAULT 0",
             },
-            "live_orders": {"execution_valid": "INTEGER NOT NULL DEFAULT 1", "invalid_reason": "TEXT"},
+            "live_orders": {
+                "execution_valid": "INTEGER NOT NULL DEFAULT 1", "invalid_reason": "TEXT",
+                "average_fill_price": "REAL", "fill_notional_usdc": "REAL NOT NULL DEFAULT 0",
+                "fee_usdc": "REAL NOT NULL DEFAULT 0", "fill_source": "TEXT",
+            },
         }
         for table, columns in additions.items():
             existing = {row[1] for row in self.db.execute(f'PRAGMA table_info("{table}")')}
@@ -306,6 +374,19 @@ class PaperEngine:
         )
         self.db.commit()
 
+    def _refresh_resolution_ledger(self) -> None:
+        """Материализует один официальный label на outcome и отвязывает settlement от тяжёлых JOIN."""
+        if not self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='training_examples'"
+        ).fetchone():
+            return
+        self.db.execute(
+            """INSERT OR IGNORE INTO event_resolutions(event_slug,outcome,token_id,label,resolved_at,source)
+               SELECT event_slug,outcome,MAX(token_id),MAX(label),?, 'training_examples'
+               FROM training_examples WHERE label IS NOT NULL GROUP BY event_slug,outcome""",
+            (now(),),
+        )
+
     @staticmethod
     def _strategy_config() -> str:
         keys = (
@@ -323,10 +404,15 @@ class PaperEngine:
             "FILL_PROBABILITY_MAX_BRIER",
             "ACTION_PROBABILITY_MODEL_WEIGHT", "ADAPTIVE_POSITION_SIZING_ENABLED",
             "POSITION_SIZE_EDGE_TIERS", "EXIT_VALUE_ENABLED", "EXIT_VALUE_MARGIN_USDC",
+            "FULL_EXIT_ONLY_ENABLED", "ENTRY_GRID_ENABLED", "ENTRY_GRID_MIN_ORDERS",
+            "ENTRY_GRID_MAX_ORDERS", "ENTRY_GRID_PRICE_STEP", "ENTRY_GRID_MIN_ORDER_USDC",
             "EXIT_FALLBACK_MIN_ADVANTAGE_USDC", "EXIT_FALLBACK_MIN_ADVANTAGE_FRACTION",
             "ML_POLICY_WAIT_UTILITY_USDC",
             "EXECUTION_SIMULATION_ENABLED", "EXECUTION_QUEUE_AHEAD_FRACTION",
             "EXECUTION_MAX_BOOK_PARTICIPATION", "EXECUTION_BASE_LATENCY_MS",
+            "PAPER_POST_EVENT_SETTLEMENT_ENABLED", "PAPER_POST_EVENT_SETTLEMENT_DELAY_SECONDS",
+            "PAPER_POST_EVENT_WIN_BID_THRESHOLD", "PAPER_POST_EVENT_LOSS_ASK_THRESHOLD",
+            "PAPER_POST_EVENT_MAX_QUOTE_DISTANCE_SECONDS",
         )
         return json.dumps({key: getattr(settings, key) for key in keys}, ensure_ascii=False)
 
@@ -373,10 +459,13 @@ class PaperEngine:
         ).fetchone()[0])
         if open_count:
             self.db.execute(
-                "INSERT OR REPLACE INTO runtime_controls VALUES('engine_state','paused',?,?)",
-                (now(), "new session blocked: open position exists"),
+                "INSERT OR REPLACE INTO runtime_controls VALUES('new_session_status','waiting_for_flat',?,?)",
+                (now(), "queued: current position is awaiting official settlement"),
             )
             self.db.commit()
+            # Сохраняем engine_state=new_session_requested. До расчёта текущей позиции
+            # шаг работает как пауза и не открывает следующую сделку; после settlement
+            # тот же запрос автоматически создаст чистую сессию.
             return "paused"
         previous = self.session_id
         previous_strategy = str(self.db.execute(
@@ -404,6 +493,10 @@ class PaperEngine:
             "INSERT OR REPLACE INTO runtime_controls VALUES('engine_state','running',?,?)",
             (now(), f"new session {self.session_id}"),
         )
+        self.db.execute(
+            "INSERT OR REPLACE INTO runtime_controls VALUES('new_session_status','completed',?,?)",
+            (now(), f"new session {self.session_id}"),
+        )
         self.db.commit()
         self.confirmation_key = None
         self.confirmation_count = 0
@@ -412,7 +505,15 @@ class PaperEngine:
     def _apply_requested_mode_if_flat(self) -> None:
         current = self._control("trading_mode", "paper")
         requested = self._control("requested_trading_mode", current)
-        if requested == current or requested not in {"paper", "live"}:
+        if requested == current:
+            if self._control("mode_switch_state", "idle") == "waiting_current_event":
+                self.db.execute(
+                    "INSERT OR REPLACE INTO runtime_controls VALUES('mode_switch_state',?,?,?)",
+                    ("active" if current == "live" else "idle", now(), "stale queued switch cleared"),
+                )
+                self.db.commit()
+            return
+        if requested not in {"paper", "live"}:
             return
         if current == "live":
             blocked = self.db.execute("SELECT 1 FROM live_positions WHERE status='open' LIMIT 1").fetchone()
@@ -472,7 +573,8 @@ class PaperEngine:
 
     def _live_total_pnl(self, state: MarketState | None) -> float:
         realized = float(self.db.execute(
-            "SELECT COALESCE(SUM(realized_pnl_usdc),0) FROM live_positions WHERE status='closed'"
+            "SELECT COALESCE(SUM(realized_pnl_usdc),0) FROM live_positions "
+            "WHERE status IN ('closed','resolved') AND execution_valid=1"
         ).fetchone()[0])
         row = self.db.execute("SELECT * FROM live_positions WHERE status='open' LIMIT 1").fetchone()
         if not row:
@@ -480,6 +582,12 @@ class PaperEngine:
         mark = row["current_price"] or row["average_price"]
         if state is not None and row["event_slug"] == state.event_slug:
             mark = state.up_bid if row["outcome"] == "Up" else state.down_bid
+            if mark is not None:
+                self.db.execute(
+                    "UPDATE live_positions SET current_price=?,mark_price_updated_at=? WHERE id=?",
+                    (float(mark), now(), row["id"]),
+                )
+                self.db.commit()
         return realized + float(row["shares"]) * float(mark or 0) - float(row["cost_usdc"])
 
     def _confirmed(self, decision: Decision, state: MarketState, position: PositionState | None) -> Decision:
@@ -549,11 +657,25 @@ class PaperEngine:
     def _price_rows(self, start_iso: str) -> tuple[dict[str, float], dict[str, float]]:
         enabled = ("bybit", "okx", "pyth")
         latest_rows = self.db.execute(
-            """SELECT p.source,p.price FROM external_prices p
+            """SELECT p.source,p.price,p.collected_at FROM external_prices p
                JOIN (SELECT source,MAX(id) id FROM external_prices WHERE source IN (?,?,?) GROUP BY source) x ON p.id=x.id""",
             enabled,
         ).fetchall()
-        latest = {str(row[0]): float(row[1]) for row in latest_rows}
+        current = datetime.now(UTC)
+        limits = {
+            "bybit": settings.MAX_EXCHANGE_AGE_SECONDS,
+            "okx": settings.MAX_EXCHANGE_AGE_SECONDS,
+            "pyth": settings.MAX_PYTH_AGE_SECONDS,
+        }
+        latest: dict[str, float] = {}
+        for row in latest_rows:
+            source = str(row[0])
+            try:
+                age = max(0.0, (current - datetime.fromisoformat(str(row[2]))).total_seconds())
+            except ValueError:
+                continue
+            if age <= float(limits[source]):
+                latest[source] = float(row[1])
         starts: dict[str, float] = {}
         for source in latest:
             row = self.db.execute(
@@ -563,6 +685,79 @@ class PaperEngine:
             if row:
                 starts[source] = float(row[0])
         return latest, starts
+
+    def _enforce_validation_stop(self, state: MarketState | None) -> bool:
+        """Обязательная пауза при устойчиво сильно устаревшей валидации."""
+        if not settings.VALIDATION_HARD_STOP_ENABLED:
+            return False
+        current = datetime.now(UTC)
+        issues: list[str] = []
+        checks = []
+        if settings.ENABLE_BYBIT:
+            checks.append(("bybit", "external_prices", "source='bybit'", settings.VALIDATION_HARD_STOP_AGE_SECONDS))
+        if settings.ENABLE_OKX:
+            checks.append(("okx", "external_prices", "source='okx'", settings.VALIDATION_HARD_STOP_AGE_SECONDS))
+        if settings.ENABLE_PYTH:
+            checks.append(("pyth", "external_prices", "source='pyth'", max(settings.MAX_PYTH_AGE_SECONDS, settings.VALIDATION_HARD_STOP_AGE_SECONDS)))
+        for source, table, condition, limit in checks:
+            row = self.db.execute(
+                f"SELECT collected_at FROM {table} WHERE {condition} ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            try:
+                age = (current - datetime.fromisoformat(str(row[0]))).total_seconds() if row else math.inf
+            except ValueError:
+                age = math.inf
+            if age > float(limit):
+                issues.append(f"{source}:{age:.1f}s")
+        if state is not None:
+            book_times = [
+                str(book.get("collected_at")) for book in state.book_json.values() if book.get("collected_at")
+            ]
+            try:
+                book_age = max((current - datetime.fromisoformat(value)).total_seconds() for value in book_times)
+            except (ValueError, TypeError):
+                book_age = math.inf
+            if book_age > settings.VALIDATION_HARD_STOP_AGE_SECONDS:
+                issues.append(f"polymarket_book:{book_age:.1f}s")
+        if not issues:
+            self.validation_bad_cycles = 0
+            self.db.execute(
+                "INSERT OR REPLACE INTO runtime_controls VALUES('validation_status','healthy',?,?)",
+                (now(), "all required price sources and CLOB books are fresh"),
+            )
+            stopped = self.db.execute(
+                "SELECT stopped_reason FROM paper_sessions WHERE session_id=?", (self.session_id,)
+            ).fetchone()
+            if stopped and str(stopped[0] or "").startswith("validation_latency:"):
+                self.db.execute(
+                    "INSERT OR REPLACE INTO runtime_controls VALUES('engine_state','running',?,?)",
+                    (now(), "automatic recovery: validations are fresh again"),
+                )
+                self.db.execute(
+                    "UPDATE paper_sessions SET status='running',stopped_reason=NULL WHERE session_id=?",
+                    (self.session_id,),
+                )
+            self.db.commit()
+            return False
+        self.validation_bad_cycles += 1
+        detail = ",".join(issues)
+        self.db.execute(
+            "INSERT OR REPLACE INTO runtime_controls VALUES('validation_status','degraded',?,?)",
+            (now(), f"cycle={self.validation_bad_cycles}; {detail}"),
+        )
+        if self.validation_bad_cycles < settings.VALIDATION_HARD_STOP_CONSECUTIVE_CYCLES:
+            self.db.commit()
+            return False
+        self.db.execute(
+            "INSERT OR REPLACE INTO runtime_controls VALUES('engine_state','paused',?,?)",
+            (now(), f"mandatory validation-latency stop: {detail}"),
+        )
+        self.db.execute(
+            "UPDATE paper_sessions SET status='paused',stopped_reason=? WHERE session_id=?",
+            (f"validation_latency:{detail}", self.session_id),
+        )
+        self.db.commit()
+        return True
 
     def market_state(self) -> MarketState | None:
         slug = self._latest_event_slug()
@@ -648,6 +843,28 @@ class PaperEngine:
             "Up": {key: up[key] for key in book_fields},
             "Down": {key: down[key] for key in book_fields},
         }
+        fees_enabled = True
+        fee_rate = settings.POLYMARKET_CRYPTO_TAKER_FEE_RATE
+        fee_exponent = 1.0
+        fee_taker_only = True
+        minimum_order_size = 0.0
+        tick_size = 0.01
+        try:
+            market_row = self.db.execute(
+                "SELECT raw_json FROM markets WHERE market_id=? LIMIT 1", (up["market_id"],),
+            ).fetchone()
+            market_payload = json.loads(str(market_row[0])) if market_row and market_row[0] else {}
+            clob_info = market_payload.get("_clob_info") or {}
+            fee_details = clob_info.get("fd") or {}
+            schedule = market_payload.get("feeSchedule") or {}
+            fees_enabled = bool(market_payload.get("feesEnabled", bool(fee_details or schedule)))
+            fee_rate = float(fee_details.get("r", schedule.get("rate", fee_rate)))
+            fee_exponent = float(fee_details.get("e", schedule.get("exponent", 1.0)))
+            fee_taker_only = bool(fee_details.get("to", schedule.get("takerOnly", True)))
+            minimum_order_size = float(clob_info.get("mos") or 0.0)
+            tick_size = float(clob_info.get("mts") or 0.01)
+        except (sqlite3.OperationalError, TypeError, ValueError, json.JSONDecodeError):
+            pass
         if self._history_slug != slug:
             try:
                 summaries = summaries_from_connection(self.db)
@@ -661,13 +878,15 @@ class PaperEngine:
             slug, now(), elapsed, remaining, returns, latest, disagreement, sharp,
             up["best_bid"], up["best_ask"], down["best_bid"], down["best_ask"],
             compact_books, target_price, reference_price, target_source, reference_observed_at, volatility,
-            target_distance_lags, dict(self._history_features),
+            target_distance_lags, dict(self._history_features), fees_enabled, fee_rate, fee_exponent, fee_taker_only,
+            minimum_order_size, tick_size,
         )
 
     def open_position(self, state: MarketState) -> PositionState | None:
         if self._control("trading_mode", "paper") == "live":
             row = self.db.execute(
-                "SELECT * FROM live_positions WHERE status='open' ORDER BY id DESC LIMIT 1"
+                "SELECT * FROM live_positions WHERE status='open' AND event_slug=? ORDER BY id DESC LIMIT 1",
+                (state.event_slug,),
             ).fetchone()
             if not row:
                 return None
@@ -675,18 +894,108 @@ class PaperEngine:
             return PositionState(
                 row["id"], row["event_slug"], row["outcome"], row["token_id"], row["shares"],
                 row["cost_usdc"], row["average_price"], current_bid, int(row["exit_stage"] or 0),
+                str(row["opened_at"]), float(row["shares"]), float(row["cost_usdc"]),
+                self._exit_runtime_features(row, state, current_bid),
             )
         row = self.db.execute(
-            "SELECT * FROM paper_positions WHERE session_id=? AND status='open' ORDER BY id DESC LIMIT 1",
-            (self.session_id,),
+            "SELECT * FROM paper_positions WHERE session_id=? AND event_slug=? AND status='open' ORDER BY id DESC LIMIT 1",
+            (self.session_id, state.event_slug),
         ).fetchone()
         if not row:
             return None
         current_bid = state.up_bid if row["outcome"] == "Up" else state.down_bid
+        buy_totals = self.db.execute(
+            """SELECT COALESCE(SUM(shares),0),
+                      COALESCE(SUM(shares*filled_price+fee_usdc),0)
+               FROM paper_orders WHERE session_id=? AND event_slug=?
+                 AND action LIKE 'BUY_%' AND status IN ('filled','partially_filled')""",
+            (self.session_id, row["event_slug"]),
+        ).fetchone()
+        original_shares = float(buy_totals[0] or row["shares"])
+        original_cost = float(buy_totals[1] or row["cost_usdc"])
         return PositionState(
             row["id"], row["event_slug"], row["outcome"], row["token_id"], row["shares"],
             row["cost_usdc"], row["average_price"], current_bid, int(row["exit_stage"] or 0),
+            str(row["opened_at"]), original_shares, original_cost,
+            {**self._exit_runtime_features(row, state, current_bid),
+             "shares": original_shares, "original_cost_usdc": original_cost},
         )
+
+    def _exit_runtime_features(
+        self, row: sqlite3.Row, state: MarketState, current_bid: float | None,
+    ) -> dict[str, float]:
+        """Воспроизводит online-признаки exit-sequence без просмотра в будущее."""
+        try:
+            opened = datetime.fromisoformat(str(row["opened_at"]))
+            if opened.tzinfo is None:
+                opened = opened.replace(tzinfo=UTC)
+        except (TypeError, ValueError):
+            opened = datetime.now(UTC)
+        observed = datetime.now(UTC)
+        has_snapshots = self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='market_snapshots'"
+        ).fetchone()
+        snapshots = (self.db.execute(
+            """SELECT collected_at,COALESCE(best_bid,midpoint),spread,best_bid_size,best_ask_size
+               FROM market_snapshots WHERE event_slug=? AND outcome=? AND collected_at>=?
+               ORDER BY collected_at DESC,id DESC LIMIT 360""",
+            (row["event_slug"], row["outcome"], row["opened_at"]),
+        ).fetchall()[::-1] if has_snapshots else [])
+        points: list[tuple[float, float]] = []
+        for snapshot in snapshots:
+            try:
+                timestamp = datetime.fromisoformat(str(snapshot[0])).timestamp()
+                bid = float(snapshot[1])
+            except (TypeError, ValueError):
+                continue
+            if 0.0 <= bid <= 1.0:
+                points.append((timestamp, bid))
+        bid = float(current_bid if current_bid is not None else (points[-1][1] if points else 0.0))
+        current_ts = observed.timestamp()
+
+        def lag_bid(seconds: int) -> float:
+            cutoff = current_ts - seconds
+            candidates = [value for timestamp, value in points if timestamp <= cutoff]
+            return candidates[-1] if candidates else (points[0][1] if points else bid)
+
+        bids = [value for _, value in points] or [bid]
+        times = [timestamp for timestamp, _ in points] or [current_ts]
+        peak = max(bids); trough = min(bids)
+        peak_index = max(range(len(bids)), key=bids.__getitem__)
+        direction = 1.0 if str(row["outcome"]) == "Up" else -1.0
+        distance = float(state.distance_to_target_pct or 0.0) * direction
+        lag60 = state.target_distance_lags_pct.get("15")
+        distance_momentum = distance - direction * float(lag60 if lag60 is not None else state.distance_to_target_pct or 0.0)
+        latest_book = state.book_json.get(str(row["outcome"]), {}) or {}
+        average = float(row["average_price"] or 0.0)
+        return {
+            "seconds_in_position": max(0.0, (observed - opened).total_seconds()),
+            "remaining_seconds": float(state.remaining_seconds),
+            "current_bid": bid,
+            "average_price": average,
+            "marked_return": bid / average - 1.0 if average > 0 else 0.0,
+            "oriented_distance_to_target_pct": distance,
+            "momentum_bid_3ticks": bid - bids[max(0, len(bids) - 4)],
+            "momentum_distance_3ticks": distance_momentum,
+            "momentum_bid_15s": bid - lag_bid(15),
+            "momentum_bid_30s": bid - lag_bid(30),
+            "momentum_bid_60s": bid - lag_bid(60),
+            "bid_slope_15s": (bid - lag_bid(15)) / 15.0,
+            "bid_slope_30s": (bid - lag_bid(30)) / 30.0,
+            "target_distance_available": float(state.distance_to_target_pct is not None),
+            "peak_bid_since_entry": peak,
+            "trough_bid_since_entry": trough,
+            "drawdown_from_peak": bid - peak,
+            "recovery_from_trough": bid - trough,
+            "seconds_since_peak": max(0.0, current_ts - times[peak_index]),
+            "maximum_favorable_excursion": peak - average,
+            "maximum_adverse_excursion": trough - average,
+            "spread": float(latest_book.get("spread") or 0.0),
+            "log_bid_size": math.log1p(max(0.0, float(latest_book.get("best_bid_size") or 0.0))),
+            "log_ask_size": math.log1p(max(0.0, float(latest_book.get("best_ask_size") or 0.0))),
+            "shares": float(row["shares"] or 0.0),
+            "original_cost_usdc": float(row["cost_usdc"] or 0.0),
+        }
 
     def _decision(self, state: MarketState, position: PositionState | None, decision: Decision, model_key: str) -> int:
         p_up = next((float(tag.split("=", 1)[1]) for tag in decision.tags if tag.startswith("p_up=")), None)
@@ -729,6 +1038,44 @@ class PaperEngine:
             return (datetime.now(UTC) - collected_at).total_seconds() <= settings.MAX_EXECUTION_BOOK_AGE_SECONDS
         except (KeyError, TypeError, ValueError):
             return False
+
+    @staticmethod
+    def _entry_grid_plan(total_notional: float, maximum_price: float, tick_size: float,
+                         minimum_shares: float) -> list[tuple[float, float]]:
+        """Распределяет модельный notional по 3–5 более выгодным лимитам.
+
+        Возвращает ``[(price, notional), ...]``. Если бюджета недостаточно для
+        трёх валидных CLOB-заявок, возвращает пустой список и вызывающий код
+        использует обычную единственную заявку, не увеличивая риск модели.
+        """
+        if not settings.ENTRY_GRID_ENABLED or total_notional <= 0 or maximum_price <= 0:
+            return []
+        tick = max(float(tick_size), 0.0001)
+        step_ticks = max(1, round(float(settings.ENTRY_GRID_PRICE_STEP) / tick))
+        minimum_count = max(3, int(settings.ENTRY_GRID_MIN_ORDERS))
+        maximum_count = max(minimum_count, int(settings.ENTRY_GRID_MAX_ORDERS))
+        for count in range(maximum_count, minimum_count - 1, -1):
+            prices: list[float] = []
+            for level in range(1, count + 1):
+                units = round(maximum_price / tick) - step_ticks * level
+                price = round(units * tick, 10)
+                if price < settings.PAPER_MIN_ENTRY_PRICE or price > settings.PAPER_MAX_ENTRY_PRICE:
+                    prices = []
+                    break
+                prices.append(price)
+            if not prices:
+                continue
+            minimum_notionals = [
+                max(float(settings.ENTRY_GRID_MIN_ORDER_USDC), price * minimum_shares)
+                for price in prices
+            ]
+            required = sum(minimum_notionals)
+            if required > total_notional + 1e-9:
+                continue
+            extra = (total_notional - required) / count
+            return [(price, minimum_notional + extra)
+                    for price, minimum_notional in zip(prices, minimum_notionals, strict=True)]
+        return []
 
     def _live_buy(self, decision_id: int, state: MarketState, decision: Decision) -> None:
         if decision.direction is None or decision.limit_price is None or self._live_pending():
@@ -783,6 +1130,15 @@ class PaperEngine:
              response["order_id"], settings.ENTRY_ORDER_TYPE, response.get("submitted_price", decision.limit_price), size,
              "submitted", now(), expiration),
         )
+        shadow_bid = state.up_bid if decision.direction == "Up" else state.down_bid
+        shadow_ask = state.up_ask if decision.direction == "Up" else state.down_ask
+        self.db.execute(
+            """INSERT OR IGNORE INTO live_decision_shadow_orders(
+               decision_id,live_order_id,event_slug,outcome,side,requested_price,requested_size,
+               observed_at,submit_best_bid,submit_best_ask) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (decision_id, response["order_id"], state.event_slug, decision.direction, "BUY",
+             float(response.get("submitted_price", decision.limit_price)), size, now(), shadow_bid, shadow_ask),
+        )
         self.db.execute("UPDATE model_decisions SET executed=1 WHERE id=?", (decision_id,))
         self.db.commit()
 
@@ -817,6 +1173,14 @@ class PaperEngine:
                requested_price,requested_size,status,created_at,expiration_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
             (decision_id, state.event_slug, position.token_id, position.outcome, "SELL", response["order_id"],
              "GTD", response.get("submitted_price", bid), size, "submitted", now(), expiration),
+        )
+        self.db.execute(
+            """INSERT OR IGNORE INTO live_decision_shadow_orders(
+               decision_id,live_order_id,event_slug,outcome,side,requested_price,requested_size,
+               observed_at,submit_best_bid,submit_best_ask) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (decision_id, response["order_id"], state.event_slug, position.outcome, "SELL",
+             float(response.get("submitted_price", bid)), size, now(), bid,
+             state.up_ask if position.outcome == "Up" else state.down_ask),
         )
         self.db.execute(
             "UPDATE live_positions SET exit_stage=MAX(exit_stage,?),exit_timing='early_exit_submitted' WHERE id=?",
@@ -863,26 +1227,52 @@ class PaperEngine:
                 original_size = max(float(actual["original_size"] or 0), float(row["requested_size"] or 0))
                 delta = max(0.0, matched - float(row["matched_size"] or 0))
                 price = float(actual["price"] or row["requested_price"])
+                fill_summary = summarize_order_fills(str(row["order_id"])) if matched > float(row["matched_size"] or 0) else {}
+                if float(fill_summary.get("size", 0)) > 0:
+                    matched = float(fill_summary["size"])
+                    delta = max(0.0, matched - float(row["matched_size"] or 0))
+                    price = float(fill_summary["vwap"])
+                cumulative_fee = float(fill_summary.get("fee", row["fee_usdc"] or 0))
+                fee_delta = max(0.0, cumulative_fee - float(row["fee_usdc"] or 0))
+                # Критично: cumulative matched_size сохраняется ДО любых сетевых действий.
+                # Поэтому неудачная отмена остатка не сможет повторно начислить тот же fill.
+                if delta > 0:
+                    self.db.execute(
+                        "UPDATE live_orders SET matched_size=?,average_fill_price=?,fill_notional_usdc=?,"
+                        "fill_source='clob_order_cumulative',last_checked_at=?,error=NULL WHERE id=?",
+                        (matched, price, float(fill_summary.get("notional", matched * price)), now(), row["id"]),
+                    )
+                    self.db.execute("UPDATE live_orders SET fee_usdc=? WHERE id=?",
+                                    (float(fill_summary.get("fee", 0)), row["id"]))
+                    self.db.commit()
                 if delta > 0 and row["side"] == "BUY":
                     position = self.db.execute(
                         "SELECT * FROM live_positions WHERE event_slug=? AND status='open'", (row["event_slug"],)
                     ).fetchone()
                     if position:
                         shares = float(position["shares"]) + delta
-                        cost = float(position["cost_usdc"]) + delta * price
-                        self.db.execute("UPDATE live_positions SET shares=?,cost_usdc=?,average_price=? WHERE id=?",
-                                        (shares, cost, cost / shares, position["id"]))
+                        cost = float(position["cost_usdc"]) + delta * price + fee_delta
+                        self.db.execute("UPDATE live_positions SET shares=?,cost_usdc=?,average_price=?,fees_usdc=fees_usdc+? WHERE id=?",
+                                        (shares, cost, cost / shares, fee_delta, position["id"]))
                     else:
                         self.db.execute(
                             """INSERT INTO live_positions(event_slug,token_id,outcome,status,opened_at,average_price,
                                shares,cost_usdc,current_price,entry_decision_id) VALUES(?,?,?,?,?,?,?,?,?,?)""",
                             (row["event_slug"], row["token_id"], row["outcome"], "open", now(), price,
-                             delta, delta * price, price, row["decision_id"]),
+                             delta, delta * price + fee_delta, price, row["decision_id"]),
                         )
+                        if fee_delta:
+                            self.db.execute("UPDATE live_positions SET fees_usdc=? WHERE event_slug=?", (fee_delta, row["event_slug"]))
                     # После первого реального fill остаток входной заявки снимается: открытая позиция
                     # должна иметь возможность немедленно отправить защитный SELL.
                     if matched + 1e-9 < original_size:
-                        cancel_live_order(str(row["order_id"]))
+                        try:
+                            cancel_live_order(str(row["order_id"]))
+                        except Exception as cancel_exc:
+                            self.db.execute(
+                                "UPDATE live_orders SET error=? WHERE id=?",
+                                (f"cancel_after_partial:{type(cancel_exc).__name__}", row["id"]),
+                            )
                 elif delta > 0 and row["side"] == "SELL":
                     position = self.db.execute(
                         "SELECT * FROM live_positions WHERE event_slug=? AND status='open'", (row["event_slug"],)
@@ -890,7 +1280,7 @@ class PaperEngine:
                     if position:
                         sold = min(delta, float(position["shares"]))
                         fraction = sold / float(position["shares"])
-                        pnl = sold * price - float(position["cost_usdc"]) * fraction
+                        pnl = sold * price - fee_delta - float(position["cost_usdc"]) * fraction
                         remaining = float(position["shares"]) - sold
                         if remaining <= 1e-8:
                             self.db.execute(
@@ -900,6 +1290,7 @@ class PaperEngine:
                                    early_exit_pnl_usdc=early_exit_pnl_usdc+? WHERE id=?""",
                                 (price, now(), price, pnl, row["decision_id"], pnl, position["id"]),
                             )
+                            self.db.execute("UPDATE live_positions SET fees_usdc=fees_usdc+? WHERE id=?", (fee_delta, position["id"]))
                         else:
                             self.db.execute(
                                 """UPDATE live_positions SET shares=?,cost_usdc=cost_usdc*?,
@@ -907,6 +1298,7 @@ class PaperEngine:
                                    had_early_exit=1,early_exit_pnl_usdc=early_exit_pnl_usdc+? WHERE id=?""",
                                 (remaining, 1.0 - fraction, pnl, pnl, position["id"]),
                             )
+                            self.db.execute("UPDATE live_positions SET fees_usdc=fees_usdc+? WHERE id=?", (fee_delta, position["id"]))
                 status_text = str(actual["status"]).upper()
                 complete = matched + 1e-9 >= original_size
                 status = "filled" if complete else ("live" if "LIVE" in status_text else "cancelled")
@@ -918,6 +1310,11 @@ class PaperEngine:
                 self.db.execute(
                     "UPDATE live_orders SET matched_size=?,status=?,last_checked_at=? WHERE id=?",
                     (matched, status, now(), row["id"]),
+                )
+                self.db.execute(
+                    """UPDATE live_decision_shadow_orders SET live_fill_price=?,live_fill_size=?,
+                       status=CASE WHEN ? > 0 THEN 'live_filled' ELSE status END WHERE live_order_id=?""",
+                    (price if matched > 0 else None, matched, matched, row["order_id"]),
                 )
             except Exception as exc:
                 self.db.execute("UPDATE live_orders SET last_checked_at=?,error=? WHERE id=?",
@@ -988,6 +1385,14 @@ class PaperEngine:
                 continue
             requested_price = float(row["requested_price"] or 0)
             book = state.book_json.get(direction, {})
+            fill_bid = book.get("best_bid")
+            fill_ask = book.get("best_ask")
+            try:
+                fill_book_age_ms = max(
+                    0.0, (datetime.now(UTC) - datetime.fromisoformat(str(book.get("collected_at")))).total_seconds() * 1000
+                )
+            except (TypeError, ValueError):
+                fill_book_age_ms = None
             simulation = limit_buy(
                 f"{state.event_slug}:{row['decision_id']}:resting:{row['check_count']}",
                 requested_price, book.get("best_ask"), book.get("best_ask_size"),
@@ -1007,7 +1412,7 @@ class PaperEngine:
                 continue
             # Заявка уже находилась в книге, поэтому при последующем касании
             # исполняется как maker. По правилам Polymarket maker fee равна нулю.
-            fee = total_fee_usdc(shares, fill, taker=False)
+            fee = state_fee_usdc(state, shares, fill, taker=False)
             notional = shares * fill
             total_cost = notional + fee
             if open_position:
@@ -1032,9 +1437,14 @@ class PaperEngine:
             self.db.execute(
                 """UPDATE paper_orders SET filled_price=?,shares=?,notional_usdc=?,fee_usdc=?,status=?,
                           fill_probability=?,latency_ms=?,execution_reason='gtd_resting_maker_fill',
-                          last_checked_at=?,check_count=check_count+1 WHERE id=?""",
+                          last_checked_at=?,check_count=check_count+1,fill_best_bid=?,fill_best_ask=?,
+                          fill_observed_at=?,observed_slippage_bps=?,book_age_ms_at_fill=?,
+                          fill_probability_kind=? WHERE id=?""",
                 (fill, cumulative_shares, cumulative_notional, cumulative_fee, final_status, simulation.fill_probability,
-                 simulation.latency_ms, now(), row["id"]),
+                 simulation.latency_ms, now(), fill_bid, fill_ask, now(),
+                 max(0.0, (fill - float(row["submit_best_ask"])) / float(row["submit_best_ask"]) * 10_000)
+                 if row["submit_best_ask"] else 0.0,
+                 fill_book_age_ms, settings.EXECUTION_FILL_PROBABILITY_KIND, row["id"]),
             )
             self.db.execute(
                 """UPDATE paper_sessions SET cash_balance_usdc=cash_balance_usdc-?,
@@ -1067,7 +1477,70 @@ class PaperEngine:
         if notional <= 0:
             return
         requested_shares = notional / decision.limit_price
+        if requested_shares + 1e-9 < state.minimum_order_size:
+            self.db.execute(
+                "UPDATE model_decisions SET reason=reason||? WHERE id=?",
+                (f"; отклонено: размер {requested_shares:.4f} < CLOB minimum {state.minimum_order_size:.4f}", decision_id),
+            )
+            self.db.commit()
+            return
+        tick_units = round(float(decision.limit_price) / max(state.tick_size, 0.0001))
+        if abs(tick_units * state.tick_size - float(decision.limit_price)) > 1e-8:
+            self.db.execute(
+                "UPDATE model_decisions SET reason=reason||? WHERE id=?",
+                (f"; отклонено: цена не кратна CLOB tick {state.tick_size}", decision_id),
+            )
+            self.db.commit()
+            return
         book = state.book_json.get(decision.direction, {})
+        submit_bid = book.get("best_bid")
+        submit_ask = book.get("best_ask")
+        submit_book_timestamp = book.get("book_timestamp")
+        try:
+            submit_book_age_ms = max(
+                0.0, (datetime.now(UTC) - datetime.fromisoformat(str(book.get("collected_at")))).total_seconds() * 1000
+            )
+        except (TypeError, ValueError):
+            submit_book_age_ms = None
+        grid = self._entry_grid_plan(
+            notional, float(decision.limit_price), float(state.tick_size), float(state.minimum_order_size),
+        ) if not add else []
+        if grid:
+            expiration = (datetime.now(UTC) + timedelta(seconds=settings.GTD_EFFECTIVE_LIFETIME_SECONDS)).isoformat()
+            self.db.execute(
+                """UPDATE paper_orders SET status='cancelled_replaced',last_checked_at=?
+                   WHERE session_id=? AND event_slug=? AND action LIKE 'BUY_%'
+                     AND status IN ('unfilled','partially_filled')""",
+                (now(), self.session_id, state.event_slug),
+            )
+            for level, (price, level_notional) in enumerate(grid, start=1):
+                requested = level_notional / price
+                simulation = limit_buy(
+                    f"{state.event_slug}:{decision_id}:grid:{level}", price,
+                    book.get("best_ask"), book.get("best_ask_size"), requested, book.get("spread"),
+                )
+                self.db.execute(
+                    """INSERT INTO paper_orders(session_id,decision_id,event_slug,action,order_type,
+                       requested_price,filled_price,shares,notional_usdc,fee_usdc,slippage_bps,status,
+                       created_at,expiration_at,price_cap,fill_probability,latency_ms,execution_reason,
+                       requested_shares,requested_notional_usdc,last_checked_at,check_count,submit_best_bid,
+                       submit_best_ask,submit_book_timestamp,book_age_ms_at_submit,fill_probability_kind)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (self.session_id, decision_id, state.event_slug, decision.action, settings.ENTRY_ORDER_TYPE,
+                     price, None, 0.0, 0.0, 0.0, 0.0, "unfilled", now(), expiration, price,
+                     simulation.fill_probability, simulation.latency_ms, f"entry_grid_l{level}:{simulation.reason}",
+                     requested, level_notional, now(), 1, submit_bid, submit_ask, submit_book_timestamp,
+                     submit_book_age_ms, settings.EXECUTION_FILL_PROBABILITY_KIND),
+                )
+            levels = ",".join(f"{price:.3f}" for price, _ in grid)
+            self.db.execute(
+                "UPDATE model_decisions SET reason=reason||?,tags_json=? WHERE id=?",
+                (f"; лимитная сетка {len(grid)} уровней: {levels}",
+                 json.dumps([*decision.tags, "entry_limit_grid", f"grid_levels={len(grid)}"], ensure_ascii=False),
+                 decision_id),
+            )
+            self.db.commit()
+            return
         simulation = limit_buy(
             f"{state.event_slug}:{decision_id}:buy", decision.limit_price,
             book.get("best_ask"), book.get("best_ask_size"), requested_shares, book.get("spread"),
@@ -1085,27 +1558,32 @@ class PaperEngine:
                 """INSERT INTO paper_orders(session_id,decision_id,event_slug,action,order_type,requested_price,
                    filled_price,shares,notional_usdc,fee_usdc,slippage_bps,status,created_at,expiration_at,
                    price_cap,fill_probability,latency_ms,execution_reason,requested_shares,
-                   requested_notional_usdc,last_checked_at,check_count)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   requested_notional_usdc,last_checked_at,check_count,submit_best_bid,submit_best_ask,
+                   submit_book_timestamp,book_age_ms_at_submit,fill_probability_kind)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (self.session_id, decision_id, state.event_slug, decision.action, settings.ENTRY_ORDER_TYPE,
                  decision.limit_price, None, 0.0, 0.0, 0.0, 0.0, simulation.status, now(), expiration,
                  decision.limit_price, simulation.fill_probability, simulation.latency_ms, simulation.reason,
-                 requested_shares, notional, now(), 1),
+                 requested_shares, notional, now(), 1, submit_bid, submit_ask, submit_book_timestamp,
+                 submit_book_age_ms, settings.EXECUTION_FILL_PROBABILITY_KIND),
             )
             self.db.commit()
             return
         fill = float(simulation.filled_price) if simulation else min(0.99, decision.limit_price)
         shares = float(simulation.filled_shares) if simulation else requested_shares
         notional = shares * fill
-        fee = total_fee_usdc(shares, fill)
+        fee = state_fee_usdc(state, shares, fill)
         total_cost = notional + fee
         if total_cost > cash:
             notional = cash / (1.0 + settings.POLYMARKET_CRYPTO_TAKER_FEE_RATE * (1.0 - fill))
             shares = notional / fill
-            fee = total_fee_usdc(shares, fill)
+            fee = state_fee_usdc(state, shares, fill)
             total_cost = notional + fee
         if add:
-            row = self.db.execute("SELECT * FROM paper_positions WHERE session_id=? AND status='open'", (self.session_id,)).fetchone()
+            row = self.db.execute(
+                "SELECT * FROM paper_positions WHERE session_id=? AND event_slug=? AND status='open'",
+                (self.session_id, state.event_slug),
+            ).fetchone()
             if not row or row["outcome"] != decision.direction:
                 return
             new_cost, new_shares = row["cost_usdc"] + total_cost, row["shares"] + shares
@@ -1125,12 +1603,19 @@ class PaperEngine:
         self.db.execute(
             """INSERT INTO paper_orders(session_id,decision_id,event_slug,action,order_type,requested_price,filled_price,
                shares,notional_usdc,fee_usdc,slippage_bps,status,created_at,expiration_at,price_cap,
-               fill_probability,latency_ms,execution_reason,requested_shares,requested_notional_usdc) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               fill_probability,latency_ms,execution_reason,requested_shares,requested_notional_usdc,
+               submit_best_bid,submit_best_ask,submit_book_timestamp,fill_best_bid,fill_best_ask,fill_observed_at,
+               observed_slippage_bps,book_age_ms_at_submit,book_age_ms_at_fill,fill_probability_kind)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (self.session_id, decision_id, state.event_slug, decision.action, settings.ENTRY_ORDER_TYPE,
              decision.limit_price, fill, shares, notional, fee, 0.0,
              simulation.status if simulation else "filled", now(), expiration, decision.limit_price,
              simulation.fill_probability if simulation else 1.0, simulation.latency_ms if simulation else 0,
-             simulation.reason if simulation else "legacy_exact_limit", requested_shares, decision.notional_usdc * self._size_multiplier()),
+             simulation.reason if simulation else "legacy_exact_limit", requested_shares,
+             decision.notional_usdc * self._size_multiplier(), submit_bid, submit_ask, submit_book_timestamp,
+             submit_bid, submit_ask, now(),
+             max(0.0, (fill - float(submit_ask)) / float(submit_ask) * 10_000) if submit_ask else 0.0,
+             submit_book_age_ms, submit_book_age_ms, settings.EXECUTION_FILL_PROBABILITY_KIND),
         )
         self.db.execute(
             "UPDATE paper_sessions SET cash_balance_usdc=cash_balance_usdc-?,total_wagered_usdc=total_wagered_usdc+?,total_fees_usdc=total_fees_usdc+? WHERE session_id=?",
@@ -1151,6 +1636,15 @@ class PaperEngine:
         fraction = max(0.0, min(1.0, fraction))
         requested_shares = position.shares * fraction
         book = state.book_json.get(position.outcome, {})
+        submit_bid = book.get("best_bid")
+        submit_ask = book.get("best_ask")
+        submit_book_timestamp = book.get("book_timestamp")
+        try:
+            submit_book_age_ms = max(
+                0.0, (datetime.now(UTC) - datetime.fromisoformat(str(book.get("collected_at")))).total_seconds() * 1000
+            )
+        except (TypeError, ValueError):
+            submit_book_age_ms = None
         cap = bid if limit_exit else max(0.01, bid * (1 - settings.FAK_PRICE_CAP_SLIPPAGE_BPS / 10_000))
         simulation = (
             fak_sell(f"{state.event_slug}:{decision_id}:sell", bid, book.get("best_bid_size"), requested_shares, cap)
@@ -1172,7 +1666,7 @@ class PaperEngine:
         fraction = sold_shares / position.shares
         allocated_cost = position.cost_usdc * fraction
         gross_proceeds = sold_shares * fill
-        fee = total_fee_usdc(sold_shares, fill)
+        fee = state_fee_usdc(state, sold_shares, fill)
         proceeds, pnl = gross_proceeds - fee, gross_proceeds - allocated_cost - fee
         if fraction < 1.0:
             self.db.execute(
@@ -1198,39 +1692,79 @@ class PaperEngine:
         self.db.execute(
             """INSERT INTO paper_orders(session_id,decision_id,event_slug,action,order_type,requested_price,filled_price,
                shares,notional_usdc,fee_usdc,slippage_bps,status,created_at,price_cap,fill_probability,latency_ms,
-               execution_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               execution_reason,submit_best_bid,submit_best_ask,submit_book_timestamp,fill_best_bid,fill_best_ask,
+               fill_observed_at,observed_slippage_bps,book_age_ms_at_submit,book_age_ms_at_fill,
+               fill_probability_kind) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (self.session_id, decision_id, state.event_slug, "PARTIAL_CLOSE" if fraction < 1 else "CLOSE",
              settings.TAKE_PROFIT_ORDER_TYPE if limit_exit else settings.EXIT_ORDER_TYPE, bid, fill, sold_shares,
              gross_proceeds, fee, simulation.slippage_bps if simulation else (0.0 if limit_exit else settings.ESTIMATED_SLIPPAGE_BPS),
              simulation.status if simulation else "filled", now(), cap,
              simulation.fill_probability if simulation else 1.0, simulation.latency_ms if simulation else 0,
-             simulation.reason if simulation else "legacy_exit"),
+             simulation.reason if simulation else "legacy_exit", submit_bid, submit_ask, submit_book_timestamp,
+             submit_bid, submit_ask, now(),
+             max(0.0, (float(submit_bid) - fill) / float(submit_bid) * 10_000) if submit_bid else 0.0,
+             submit_book_age_ms, submit_book_age_ms, settings.EXECUTION_FILL_PROBABILITY_KIND),
         )
         self.db.execute("UPDATE model_decisions SET executed=1 WHERE id=?", (decision_id,))
         self.db.commit()
 
     def settle_resolved(self) -> None:
-        positions = self.db.execute("SELECT * FROM paper_positions WHERE status='open'").fetchall()
+        self._refresh_resolution_ledger()
+        positions = self.db.execute(
+            "SELECT * FROM paper_positions WHERE status IN ('open','provisionally_resolved')"
+        ).fetchall()
         for row in positions:
             label = self.db.execute(
-                "SELECT label FROM training_examples WHERE event_slug=? AND token_id=? LIMIT 1",
+                "SELECT label,resolved_at FROM event_resolutions WHERE event_slug=? AND token_id=? LIMIT 1",
                 (row["event_slug"], row["token_id"]),
             ).fetchone()
             if not label:
                 continue
-            payout = float(row["shares"]) * int(label[0])
-            pnl = payout - float(row["cost_usdc"])
-            self.db.execute(
-                """UPDATE paper_positions SET status='resolved',current_price=?,closed_at=?,close_price=?,
-                   realized_pnl_usdc=COALESCE(realized_pnl_usdc,0)+?,close_reason='market_resolution',
-                   exit_timing=CASE WHEN had_early_exit=1 THEN 'partial_early_then_resolution' ELSE 'held_to_resolution' END
-                   WHERE id=?""",
-                (float(label[0]), now(), float(label[0]), pnl, row["id"]),
-            )
-            self.db.execute(
-                "UPDATE paper_sessions SET cash_balance_usdc=cash_balance_usdc+?,realized_pnl_usdc=realized_pnl_usdc+? WHERE session_id=?",
-                (payout, pnl, row["session_id"]),
-            )
+            official_label = int(label[0])
+            payout = float(row["shares"]) * official_label
+            if str(row["status"]) == "provisionally_resolved":
+                provisional_label = int(row["provisional_label"] or 0)
+                credited_payout = float(row["shares"]) * provisional_label
+                adjustment = payout - credited_payout
+                self.db.execute(
+                    """UPDATE paper_positions SET status='resolved',current_price=?,close_price=?,
+                       realized_pnl_usdc=COALESCE(realized_pnl_usdc,0)+?,
+                       close_reason=CASE WHEN had_early_exit=1
+                         THEN COALESCE(NULLIF(close_reason,'' ) || '; ','') || 'remaining_shares_market_resolution_after_provisional'
+                         ELSE 'market_resolution_after_provisional' END,
+                       exit_timing=CASE WHEN had_early_exit=1 THEN 'partial_early_then_resolution' ELSE 'held_to_resolution' END,
+                       official_label=?,official_reconciled_at=?,provisional_mismatch=?,
+                       resolution_labeled_at=?,settlement_latency_seconds=MAX(0,unixepoch(?) -
+                         (CAST(SUBSTR(event_slug,INSTR(event_slug,'5m-')+3) AS INTEGER)+300))
+                       WHERE id=?""",
+                    (float(official_label), float(official_label), adjustment, official_label, now(),
+                     int(provisional_label != official_label), label[1], label[1], row["id"]),
+                )
+                self.db.execute(
+                    """UPDATE paper_sessions SET cash_balance_usdc=cash_balance_usdc+?,
+                       realized_pnl_usdc=realized_pnl_usdc+? WHERE session_id=?""",
+                    (adjustment, adjustment, row["session_id"]),
+                )
+            else:
+                pnl = payout - float(row["cost_usdc"])
+                self.db.execute(
+                    """UPDATE paper_positions SET status='resolved',current_price=?,closed_at=?,close_price=?,
+                       realized_pnl_usdc=COALESCE(realized_pnl_usdc,0)+?,
+                       close_reason=CASE WHEN had_early_exit=1
+                         THEN COALESCE(NULLIF(close_reason,'' ) || '; ','') || 'remaining_shares_market_resolution'
+                         ELSE 'market_resolution' END,
+                       exit_timing=CASE WHEN had_early_exit=1 THEN 'partial_early_then_resolution' ELSE 'held_to_resolution' END,
+                       official_label=?,official_reconciled_at=?,resolution_labeled_at=?,
+                       settlement_latency_seconds=MAX(0,unixepoch(?) -
+                         (CAST(SUBSTR(event_slug,INSTR(event_slug,'5m-')+3) AS INTEGER)+300))
+                       WHERE id=?""",
+                    (float(official_label), now(), float(official_label), pnl, official_label, now(),
+                     label[1], label[1], row["id"]),
+                )
+                self.db.execute(
+                    "UPDATE paper_sessions SET cash_balance_usdc=cash_balance_usdc+?,realized_pnl_usdc=realized_pnl_usdc+? WHERE session_id=?",
+                    (payout, pnl, row["session_id"]),
+                )
         pending_cf = self.db.execute(
             """SELECT c.*,MAX(t.label) AS joined_label
                FROM counterfactual_entries c
@@ -1247,6 +1781,7 @@ class PaperEngine:
                    resolved_label=?,status='resolved' WHERE id=?""",
                 (now(), float(resolved_label), entry_fee, pnl, resolved_label, row["id"]),
             )
+        self._evaluate_next_event_forecasts()
         decisions = self.db.execute(
             """SELECT DISTINCT d.id,d.event_slug,d.action FROM model_decisions d
                JOIN training_examples t ON t.event_slug=d.event_slug
@@ -1273,29 +1808,368 @@ class PaperEngine:
         self._enforce_loss_streak()
         self.db.commit()
 
-    def _enforce_loss_streak(self) -> bool:
+    def _provisionally_settle_ended_paper_positions(self) -> None:
+        """Освобождает PAPER-позицию через T+10s только по экстремальной финальной котировке.
+
+        Это оперативная бухгалтерская оценка, а не официальный label. Поздний
+        официальный resolution всегда сверяет и при необходимости корректирует её.
+        """
+        if not settings.PAPER_POST_EVENT_SETTLEMENT_ENABLED:
+            return
+        current = datetime.now(UTC)
         rows = self.db.execute(
-            "SELECT realized_pnl_usdc FROM paper_positions WHERE session_id=? AND status IN ('closed','resolved') AND COALESCE(execution_valid,1)=1 ORDER BY closed_at DESC LIMIT ?",
+            "SELECT * FROM paper_positions WHERE status='open' ORDER BY id"
+        ).fetchall()
+        for row in rows:
+            try:
+                event_end = datetime.fromtimestamp(
+                    int(str(row["event_slug"]).rsplit("-", 1)[-1]) + 300, UTC,
+                )
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if (current - event_end).total_seconds() < settings.PAPER_POST_EVENT_SETTLEMENT_DELAY_SECONDS:
+                continue
+            cutoff = (event_end - timedelta(
+                seconds=float(settings.PAPER_POST_EVENT_MAX_QUOTE_DISTANCE_SECONDS)
+            )).isoformat()
+            quotes = self.db.execute(
+                """SELECT outcome,best_bid,best_ask,collected_at FROM market_snapshots
+                   WHERE event_slug=? AND collected_at>=? ORDER BY collected_at DESC,id DESC""",
+                (row["event_slug"], cutoff),
+            ).fetchall()
+            latest: dict[str, sqlite3.Row] = {}
+            for quote in quotes:
+                latest.setdefault(str(quote["outcome"]), quote)
+            held = latest.get(str(row["outcome"]))
+            other = latest.get("Down" if str(row["outcome"]) == "Up" else "Up")
+            if held is None:
+                continue
+            held_bid = float(held["best_bid"] or 0.0)
+            held_ask = float(held["best_ask"] or 1.0)
+            other_bid = float(other["best_bid"] or 0.0) if other is not None else 0.0
+            if held_bid >= settings.PAPER_POST_EVENT_WIN_BID_THRESHOLD:
+                provisional_label = 1
+            elif held_ask <= settings.PAPER_POST_EVENT_LOSS_ASK_THRESHOLD or other_bid >= settings.PAPER_POST_EVENT_WIN_BID_THRESHOLD:
+                provisional_label = 0
+            else:
+                continue
+            payout = float(row["shares"]) * provisional_label
+            pnl = payout - float(row["cost_usdc"])
+            self.db.execute(
+                """UPDATE paper_positions SET status='provisionally_resolved',current_price=?,closed_at=?,
+                   close_price=?,realized_pnl_usdc=COALESCE(realized_pnl_usdc,0)+?,
+                   close_reason='post_event_quote_heuristic',
+                   exit_timing=CASE WHEN had_early_exit=1 THEN 'partial_early_then_provisional'
+                                    ELSE 'held_to_provisional_resolution' END,
+                   provisional_resolution=1,provisional_label=?,provisional_resolved_at=?,
+                   provisional_source='post_event_extreme_quote_t_plus_10s' WHERE id=?""",
+                (float(provisional_label), now(), float(provisional_label), pnl,
+                 provisional_label, now(), row["id"]),
+            )
+            self.db.execute(
+                """UPDATE paper_sessions SET cash_balance_usdc=cash_balance_usdc+?,
+                   realized_pnl_usdc=realized_pnl_usdc+? WHERE session_id=?""",
+                (payout, pnl, row["session_id"]),
+            )
+        self.db.commit()
+
+    def _record_next_event_forecast(self, state: MarketState) -> None:
+        """Записывает shadow-прогноз следующей секции; реальную заявку не отправляет."""
+        if not settings.NEXT_EVENT_CONTEXT_ENABLED:
+            return
+        # Stale market_state иногда живёт несколько секунд после закрытия окна.
+        # Такой прогноз уже относится к начавшемуся, а не pre-open событию.
+        if state.remaining_seconds <= 0 or state.elapsed_seconds < 0:
+            return
+        source_start = int(state.event_slug.rsplit("-", 1)[-1])
+        next_start = source_start + 300
+        if time.time() >= next_start:
+            return
+        sample_seconds = max(1.0, float(settings.NEXT_EVENT_FORECAST_SAMPLE_SECONDS))
+        if time.monotonic() - self.last_next_forecast_at < sample_seconds:
+            return
+        self.last_next_forecast_at = time.monotonic()
+        next_slug = f"{settings.COLLECTOR_BTC_5M_SLUG_PREFIX}-{source_start + 300}"
+        momentum = math.tanh(state.consensus_return_pct / 0.12)
+        target_signal = math.tanh(float(state.distance_to_target_pct or 0.0) / 0.06)
+        # Базовый temporal predictor нужен для начала честной разметки. Он не
+        # считается обученной production-моделью и работает только в shadow.
+        predicted_up = min(0.95, max(0.05, 0.5 + 0.20 * momentum + 0.08 * target_signal))
+        direction = "Up" if predicted_up >= 0.5 else "Down"
+        confidence = max(predicted_up, 1.0 - predicted_up)
+        preview = None
+        if "future_event_snapshots" in {
+            str(row[0]) for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }:
+            preview = self.db.execute(
+                """SELECT token_id,best_bid,best_ask FROM future_event_snapshots
+                   WHERE next_event_slug=? AND outcome=? AND seconds_before_start>=0
+                   ORDER BY id DESC LIMIT 1""",
+                (next_slug, direction),
+            ).fetchone()
+        token_id = str(preview[0]) if preview else None
+        ask = float(preview[2]) if preview and preview[2] is not None else None
+        bid = float(preview[1]) if preview and preview[1] is not None else None
+        # Пассивный maker-like лимит ставится выгоднее текущего ask. Bid является
+        # первой ценой в очереди; модель вправе заменить заявку новым прогнозом.
+        reference_price = bid if bid is not None else ask
+        planned_price = (
+            min(float(settings.PAPER_MAX_ENTRY_PRICE), float(settings.NEXT_EVENT_LIMIT_PRICE_CAP),
+                max(float(settings.PAPER_MIN_ENTRY_PRICE), float(settings.NEXT_EVENT_LIMIT_PRICE_FLOOR), reference_price))
+            if reference_price is not None else None
+        )
+        selected_probability = predicted_up if direction == "Up" else 1.0 - predicted_up
+        if planned_price is not None:
+            probe_notional = float(settings.PAPER_ENTRY_NOTIONAL_USDC)
+            probe_shares = probe_notional / planned_price
+            probe_ev = probe_shares * selected_probability - probe_notional - total_fee_usdc(
+                probe_shares, planned_price, taker=False,
+            )
+            planned_notional = position_notional(
+                net_buy_edge(selected_probability, planned_price), probe_ev,
+                win_probability=selected_probability, entry_price=planned_price,
+                fill_probability=0.5,
+            )
+            if planned_notional > 0:
+                minimum_notional = max(
+                    float(settings.POSITION_SIZE_MIN_USDC),
+                    float(settings.DEFAULT_CLOB_MIN_ORDER_SIZE_SHARES) * planned_price,
+                )
+                planned_notional = min(
+                    max(float(planned_notional), minimum_notional),
+                    float(settings.PAPER_MAX_EVENT_EXPOSURE_USDC),
+                    float(settings.MAX_POSITION_USDC),
+                )
+        else:
+            planned_notional = 0.0
+        self.db.execute(
+            """INSERT OR IGNORE INTO next_event_forecasts(
+                 source_event_slug,next_event_slug,observed_at,sample_bucket,seconds_to_source_end,
+                 current_target_distance_pct,current_consensus_return_pct,current_realized_volatility,
+                 history_features_json,predictor_version,predicted_next_up_probability,
+                 predicted_direction,confidence,planned_token_id,planned_limit_price,
+                 planned_notional_usdc,planned_order_type,preopen_book_available)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (state.event_slug, next_slug, now(), int(time.time() // sample_seconds), state.remaining_seconds,
+             state.distance_to_target_pct, state.consensus_return_pct, state.realized_volatility_60s_pct,
+             json.dumps(state.history_features, ensure_ascii=False), "temporal_baseline_v1_shadow",
+             predicted_up, direction, confidence, token_id, planned_price,
+             planned_notional, "GTD_SHADOW", int(preview is not None)),
+        )
+        forecast = self.db.execute(
+            """SELECT id FROM next_event_forecasts WHERE source_event_slug=? AND next_event_slug=?
+               AND sample_bucket=?""",
+            (state.event_slug, next_slug, int(time.time() // sample_seconds)),
+        ).fetchone()
+        if (
+            settings.NEXT_EVENT_PREOPEN_SHADOW_ENABLED and forecast is not None
+            and token_id and planned_price is not None and planned_notional > 0 and preview is not None
+        ):
+            self._upsert_preopen_shadow_order(
+                int(forecast[0]), state.event_slug, next_slug, direction, token_id,
+                float(planned_price), float(planned_notional), confidence,
+            )
+        self.db.commit()
+
+    def _upsert_preopen_shadow_order(
+        self, forecast_id: int, source_slug: str, next_slug: str, outcome: str,
+        token_id: str, limit_price: float, notional: float, confidence: float,
+    ) -> None:
+        active = self.db.execute(
+            """SELECT * FROM shadow_preopen_orders WHERE next_event_slug=? AND status='working'
+               ORDER BY id DESC LIMIT 1""", (next_slug,),
+        ).fetchone()
+        replace = active is not None and (
+            str(active["outcome"]) != outcome
+            or abs(float(active["limit_price"]) - limit_price) >= .01 * settings.NEXT_EVENT_ORDER_REPLACE_TICKS
+        )
+        if active is not None and not replace:
+            self.db.execute(
+                """UPDATE shadow_preopen_orders SET forecast_id=?,confidence=?,notional_usdc=?,
+                   updated_at=? WHERE id=?""",
+                (forecast_id, confidence, notional, now(), active["id"]),
+            )
+            return
+        if active is not None:
+            self.db.execute(
+                """UPDATE shadow_preopen_orders SET status='cancelled_replaced',cancelled_at=?,
+                   cancel_reason='model_repriced_or_changed_direction',updated_at=? WHERE id=?""",
+                (now(), now(), active["id"]),
+            )
+        start = event_start(next_slug)
+        self.db.execute(
+            """INSERT INTO shadow_preopen_orders(forecast_id,source_event_slug,next_event_slug,
+               outcome,token_id,limit_price,notional_usdc,confidence,model_name,requested_at,
+               updated_at,expires_at,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'working')""",
+            (forecast_id, source_slug, next_slug, outcome, token_id, limit_price, notional,
+             confidence, "temporal_baseline_v1_shadow", now(), now(), start.isoformat()),
+        )
+
+    def _update_preopen_shadow_orders(self) -> None:
+        """Исполняет только shadow-лимиты до старта и архивирует неисполненные."""
+        if not self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='future_event_snapshots'"
+        ).fetchone():
+            return
+        current = datetime.now(UTC)
+        rows = self.db.execute(
+            "SELECT * FROM shadow_preopen_orders WHERE status='working' ORDER BY id"
+        ).fetchall()
+        for row in rows:
+            start = event_start(str(row["next_event_slug"]))
+            fill = self.db.execute(
+                """SELECT collected_at,best_ask FROM future_event_snapshots
+                   WHERE next_event_slug=? AND outcome=? AND collected_at>=?
+                     AND collected_at<? AND best_ask IS NOT NULL AND best_ask<=?
+                   ORDER BY collected_at LIMIT 1""",
+                (row["next_event_slug"], row["outcome"], row["requested_at"],
+                 start.isoformat(), float(row["limit_price"])),
+            ).fetchone()
+            if fill is not None:
+                self.db.execute(
+                    """UPDATE shadow_preopen_orders SET status='filled_shadow',filled_at=?,
+                       fill_price=?,updated_at=? WHERE id=?""",
+                    (fill[0], float(fill[1]), now(), row["id"]),
+                )
+            elif current >= start:
+                self.db.execute(
+                    """UPDATE shadow_preopen_orders SET status='expired_unfilled',cancelled_at=?,
+                       cancel_reason='next_event_started_without_fill',updated_at=? WHERE id=?""",
+                    (now(), now(), row["id"]),
+                )
+
+    def _evaluate_next_event_forecasts(self) -> None:
+        """Размечает next-event forecast только после официального исхода будущего события."""
+        self._update_preopen_shadow_orders()
+        self.db.execute(
+            """UPDATE next_event_forecasts SET status='invalid_after_start',evaluated_at=?
+               WHERE status='pending' AND unixepoch(observed_at)>=
+                     CAST(SUBSTR(next_event_slug,INSTR(next_event_slug,'5m-')+3) AS INTEGER)""",
+            (now(),),
+        )
+        rows = self.db.execute(
+            """SELECT f.*,MAX(t.label) AS next_up_label
+               FROM next_event_forecasts f
+               JOIN training_examples t ON t.event_slug=f.next_event_slug AND t.outcome='Up'
+               WHERE f.status='pending' AND unixepoch(f.observed_at)<
+                     CAST(SUBSTR(f.next_event_slug,INSTR(f.next_event_slug,'5m-')+3) AS INTEGER)
+               GROUP BY f.id"""
+        ).fetchall()
+        has_preview = bool(self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='future_event_snapshots'"
+        ).fetchone())
+        for row in rows:
+            label = int(row["next_up_label"])
+            direction_won = label if row["predicted_direction"] == "Up" else 1 - label
+            fill_row = None
+            if has_preview and row["planned_limit_price"] is not None:
+                fill_row = self.db.execute(
+                    """SELECT collected_at,best_ask FROM future_event_snapshots
+                       WHERE next_event_slug=? AND outcome=? AND seconds_before_start>=0
+                         AND collected_at>=? AND best_ask IS NOT NULL AND best_ask<=?
+                       ORDER BY collected_at LIMIT 1""",
+                    (row["next_event_slug"], row["predicted_direction"], row["observed_at"],
+                     float(row["planned_limit_price"])),
+                ).fetchone()
+            filled = int(fill_row is not None)
+            fill_price = float(fill_row[1]) if fill_row else None
+            pnl = None
+            if fill_price and fill_price > 0:
+                notional = float(row["planned_notional_usdc"] or settings.PAPER_ENTRY_NOTIONAL_USDC)
+                shares = notional / fill_price
+                # Касание лимита после постановки считается maker-fill; комиссия maker=0.
+                fee = total_fee_usdc(shares, fill_price, taker=False)
+                pnl = shares * direction_won - notional - fee
+            self.db.execute(
+                """UPDATE next_event_forecasts SET status='evaluated',next_resolved_label=?,
+                     hypothetical_filled=?,hypothetical_fill_price=?,hypothetical_pnl_usdc=?,evaluated_at=?
+                   WHERE id=?""",
+                (label, filled, fill_price, pnl, now(), row["id"]),
+            )
+
+    def _enforce_loss_streak(self) -> bool:
+        pnl_rows = self.db.execute(
+            "SELECT id,realized_pnl_usdc FROM paper_positions WHERE session_id=? AND status IN ('closed','resolved') AND COALESCE(execution_valid,1)=1 ORDER BY closed_at DESC,id DESC LIMIT ?",
             (self.session_id, settings.MAX_CONSECUTIVE_LOSSES),
         ).fetchall()
-        streak = 0
-        for row in rows:
-            if float(row[0] or 0) < 0:
-                streak += 1
+        loss_streak = 0
+        for row in pnl_rows:
+            if float(row["realized_pnl_usdc"] or 0) < 0:
+                loss_streak += 1
             else:
                 break
-        if streak >= settings.MAX_CONSECUTIVE_LOSSES:
+        direction_rows = self.db.execute(
+            """SELECT l.decision_was_correct FROM strategy_labels l
+               JOIN model_decisions d ON d.id=l.decision_id
+               WHERE d.session_id=? AND d.executed=1 AND d.action IN ('BUY_UP','BUY_DOWN')
+                 AND l.decision_was_correct IS NOT NULL
+               ORDER BY l.labeled_at DESC,l.decision_id DESC LIMIT ?""",
+            (self.session_id, settings.MAX_CONSECUTIVE_WRONG_DIRECTIONS),
+        ).fetchall()
+        wrong_direction_streak = 0
+        for row in direction_rows:
+            if int(row[0]) == 0:
+                wrong_direction_streak += 1
+            else:
+                break
+        stop_reason = None
+        if wrong_direction_streak >= settings.MAX_CONSECUTIVE_WRONG_DIRECTIONS:
+            stop_reason = f"{wrong_direction_streak}_consecutive_wrong_directions"
+        elif loss_streak >= settings.MAX_CONSECUTIVE_LOSSES:
+            stop_reason = f"{loss_streak}_consecutive_losing_trades"
+        if stop_reason:
+            latest_position_id = int(pnl_rows[0]["id"]) if pnl_rows else 0
+            acknowledged_id = int(self._control("loss_streak_trigger_position_id", "0") or 0)
+            cooldown_until_raw = self._control("paper_cooldown_until", "")
+            try:
+                cooldown_until = datetime.fromisoformat(cooldown_until_raw).astimezone(UTC)
+            except (TypeError, ValueError):
+                cooldown_until = None
+            current = datetime.now(UTC)
+            # Обработанная серия не должна немедленно блокировать сессию снова
+            # после ручной разблокировки или автоматического окончания паузы.
+            if acknowledged_id == latest_position_id:
+                if cooldown_until is not None and current < cooldown_until:
+                    return True
+                if self._control("engine_state", "running") == "paused" and cooldown_until is not None:
+                    self.db.execute(
+                        "INSERT OR REPLACE INTO runtime_controls VALUES('engine_state','running',?,?)",
+                        (now(), "automatic PAPER cooldown completed"),
+                    )
+                    self.db.execute(
+                        "INSERT OR REPLACE INTO runtime_controls VALUES('paper_cooldown_state','completed',?,?)",
+                        (now(), stop_reason),
+                    )
+                    self.db.execute(
+                        "UPDATE paper_sessions SET status='running',consecutive_losses=0,stopped_reason=NULL WHERE session_id=?",
+                        (self.session_id,),
+                    )
+                    self.db.commit()
+                return False
+            cooldown_until = current + timedelta(seconds=settings.PAPER_LOSS_STREAK_COOLDOWN_SECONDS)
             self.db.execute(
-                "UPDATE paper_sessions SET status='forced_stopped',consecutive_losses=?,stopped_reason='10_consecutive_losses' WHERE session_id=?",
-                (streak, self.session_id),
+                "UPDATE paper_sessions SET status='paused',consecutive_losses=?,stopped_reason=? WHERE session_id=?",
+                (loss_streak, stop_reason, self.session_id),
             )
             self.db.execute(
                 "INSERT OR REPLACE INTO runtime_controls VALUES('engine_state','paused',?,?)",
-                (now(), "10 consecutive losing trades"),
+                (now(), f"30-minute PAPER cooldown: {stop_reason}"),
+            )
+            self.db.execute(
+                "INSERT OR REPLACE INTO runtime_controls VALUES('paper_cooldown_until',?,?,?)",
+                (cooldown_until.isoformat(), now(), stop_reason),
+            )
+            self.db.execute(
+                "INSERT OR REPLACE INTO runtime_controls VALUES('paper_cooldown_state','active',?,?)",
+                (now(), stop_reason),
+            )
+            self.db.execute(
+                "INSERT OR REPLACE INTO runtime_controls VALUES('loss_streak_trigger_position_id',?,?,?)",
+                (str(latest_position_id), now(), stop_reason),
             )
             self.db.commit()
             return True
-        self.db.execute("UPDATE paper_sessions SET consecutive_losses=? WHERE session_id=?", (streak, self.session_id))
+        self.db.execute("UPDATE paper_sessions SET consecutive_losses=? WHERE session_id=?", (loss_streak, self.session_id))
         return False
 
     def _counterfactuals(self, state: MarketState, decision_id: int, decision: Decision) -> None:
@@ -1435,22 +2309,28 @@ class PaperEngine:
     def _shadow_tournament(self, state: MarketState, position: PositionState | None, active_model: str) -> None:
         if not settings.SHADOW_TOURNAMENT_ENABLED or time.monotonic() - self.last_shadow_at < settings.SHADOW_SAMPLE_SECONDS:
             return
-        for model_key in settings.SHADOW_MODELS:
-            if not model_is_ready(model_key):
-                continue
-            try:
-                decision = decide_with_model(state, position, model_key)
-            except Exception:
-                continue
-            p_up = next((float(tag.split("=", 1)[1]) for tag in decision.tags if tag.startswith("p_up=")), None)
-            self.db.execute(
-                """INSERT INTO shadow_predictions(event_slug,observed_at,model_name,action,direction,confidence,
-                   predicted_up_probability,entry_price,notional_usdc,reason,status) VALUES(?,?,?,?,?,?,?,?,?,?,'pending')""",
-                (state.event_slug, now(), model_key, decision.action, decision.direction, decision.confidence,
-                 p_up, decision.limit_price, decision.notional_usdc, decision.reason),
-            )
-        self.last_shadow_at = time.monotonic()
-        self.db.commit()
+        try:
+            for model_key in settings.SHADOW_MODELS:
+                if not model_is_ready(model_key):
+                    continue
+                try:
+                    decision = decide_with_model(state, position, model_key)
+                except Exception:
+                    continue
+                p_up = next((float(tag.split("=", 1)[1]) for tag in decision.tags if tag.startswith("p_up=")), None)
+                self.db.execute(
+                    """INSERT INTO shadow_predictions(event_slug,observed_at,model_name,action,direction,confidence,
+                       predicted_up_probability,entry_price,notional_usdc,reason,status) VALUES(?,?,?,?,?,?,?,?,?,?,'pending')""",
+                    (state.event_slug, now(), model_key, decision.action, decision.direction, decision.confidence,
+                     p_up, decision.limit_price, decision.notional_usdc, decision.reason),
+                )
+            self.db.commit()
+            self.last_shadow_at = time.monotonic()
+        except sqlite3.OperationalError as error:
+            self.db.rollback()
+            if "locked" not in str(error).lower():
+                raise
+            print("SHADOW_SAMPLE_SKIPPED reason=database_locked")
 
     def _resolve_shadow(self) -> None:
         rows = self.db.execute(
@@ -1602,12 +2482,16 @@ class PaperEngine:
         )
         self.db.commit()
         self.settle_resolved()
+        self._provisionally_settle_ended_paper_positions()
         self._settle_live_records()
         self._resolve_shadow()
         self._resolve_exit_shadow()
         self._apply_requested_mode_if_flat()
         self._apply_pending_models()
         state = self.market_state()
+        self._enforce_validation_stop(state)
+        if state is not None:
+            self._record_next_event_forecast(state)
         self._evaluate_counterfactuals(state)
         self._evaluate_v8_counterfactuals(state)
         engine_state = self._handle_runtime_control()
@@ -1704,9 +2588,22 @@ class PaperEngine:
                 decision = Decision("WAIT", decision.confidence, "Повторный свежий вход в это событие запрещён", [*decision.tags, "event_entry_limit"])
         self._record_exit_shadow(state, position, decision, trading_mode)
         decision = self._confirmed(decision, state, position)
+        # Полный выход является инвариантом исполнения: даже старый артефакт или
+        # кешированное решение PARTIAL_CLOSE преобразуется в полное CLOSE.
+        if settings.FULL_EXIT_ONLY_ENABLED and decision.action == "PARTIAL_CLOSE":
+            decision = Decision(
+                "CLOSE", decision.confidence,
+                f"{decision.reason}; частичный выход преобразован в полный",
+                [*decision.tags, "full_exit_only"], direction=decision.direction,
+                exit_fraction=1.0,
+            )
         status = self.db.execute("SELECT status FROM paper_sessions WHERE session_id=?", (self.session_id,)).fetchone()[0]
         if status == "forced_stopped" or self._enforce_loss_streak():
-            decision = Decision("WAIT", 1.0, "Модель принудительно остановлена после 10 проигрышей подряд", ["loss_streak_stop"])
+            decision = Decision(
+                "WAIT", 1.0,
+                f"PAPER поставлен на {settings.PAPER_LOSS_STREAK_COOLDOWN_SECONDS // 60} минут после серии убытков",
+                ["loss_streak_cooldown"],
+            )
         day_cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
         daily_realized = float(self.db.execute(
             """SELECT COALESCE(SUM(realized_pnl_usdc),0) FROM paper_positions
@@ -1744,9 +2641,13 @@ class PaperEngine:
         return decision
 
     def close(self) -> None:
-        self.db.execute("UPDATE paper_sessions SET status='paused' WHERE session_id=?", (self.session_id,))
-        self.db.commit()
-        self.db.close()
+        try:
+            self.db.execute("UPDATE paper_sessions SET status='paused' WHERE session_id=?", (self.session_id,))
+            self.db.commit()
+        except sqlite3.OperationalError:
+            self.db.rollback()
+        finally:
+            self.db.close()
 
 
 def arguments() -> argparse.Namespace:
@@ -1776,11 +2677,15 @@ async def main() -> None:
                 engine.db.commit()
                 print(f"PAPER_DECISION action={decision.action} confidence={decision.confidence:.3f} reason={decision.reason}")
             except Exception as exc:
-                engine.db.execute(
-                    "INSERT OR REPLACE INTO runtime_controls VALUES('engine_last_error',?,?,?)",
-                    (type(exc).__name__, now(), "step failed; loop continues"),
-                )
-                engine.db.commit()
+                engine.db.rollback()
+                try:
+                    engine.db.execute(
+                        "INSERT OR REPLACE INTO runtime_controls VALUES('engine_last_error',?,?,?)",
+                        (type(exc).__name__, now(), "step failed; loop continues"),
+                    )
+                    engine.db.commit()
+                except sqlite3.OperationalError:
+                    engine.db.rollback()
                 print(f"TRADING_ENGINE_ERROR type={type(exc).__name__}")
             if args.once or args.max_seconds and time.monotonic() - started >= args.max_seconds:
                 break

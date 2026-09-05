@@ -49,7 +49,7 @@ async def main() -> None:
     storage = Storage(args.db); started = time.monotonic(); last_label = 0.0; last_maintenance = 0.0; last_archive = 0.0
     retraining_task: asyncio.Task | None = None
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=3.0)) as client:
             while args.max_seconds == 0 or time.monotonic() - started < args.max_seconds:
                 try:
                     found = await find_open_event(client)

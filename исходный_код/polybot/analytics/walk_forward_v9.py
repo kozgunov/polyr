@@ -18,6 +18,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostin
 
 from polybot.models.counterfactual_actions import action_vector
 from polybot.models.exit_features import feature_map, vector as exit_vector
+from polybot.models.action_value import position_notional
 from polybot.trading.fees import total_fee_usdc
 
 
@@ -36,11 +37,17 @@ def _load(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
            ORDER BY c.event_slug,c.observed_at,c.action,c.candidate_price""",
         (settings.PAPER_ENTRY_NOTIONAL_USDC,),
     ).fetchall()
+    selected_observation: dict[tuple[str, int], str] = {}
     for row in rows:
+        event = str(row["event_slug"]); observed = str(row["observed_at"])
+        bucket = (event, int(_time(observed) // 5))
+        selected_observation.setdefault(bucket, observed)
+        if selected_observation[bucket] != observed:
+            continue
         features = json.loads(row["features_json"])
         outcome = str(row["outcome"])
         entries.append({
-            "event": str(row["event_slug"]), "observed": str(row["observed_at"]),
+            "event": event, "observed": observed,
             "outcome": outcome, "price": float(row["candidate_price"]),
             "fill_price": float(row["fill_price"] or row["candidate_price"]),
             "filled": int(row["filled"]), "pnl": float(row["target_net_pnl_usdc"]),
@@ -53,18 +60,22 @@ def _load(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """SELECT * FROM action_counterfactuals WHERE action='HOLD' AND horizon_seconds>=300
            AND status='resolved' AND net_pnl_usdc IS NOT NULL ORDER BY event_slug,observed_at"""
     ).fetchall()
+    close_by_decision: dict[int, float] = {}
+    for close_row in db.execute(
+        """SELECT decision_id,net_pnl_usdc FROM action_counterfactuals
+           WHERE action='CLOSE' AND status='evaluated' AND net_pnl_usdc IS NOT NULL
+           ORDER BY id"""
+    ):
+        if close_row[0] is not None:
+            close_by_decision.setdefault(int(close_row[0]), float(close_row[1]))
     for hold in holds:
-        close = db.execute(
-            """SELECT net_pnl_usdc FROM action_counterfactuals WHERE decision_id=? AND action='CLOSE'
-               AND status='evaluated' AND net_pnl_usdc IS NOT NULL ORDER BY id LIMIT 1""",
-            (hold["decision_id"],),
-        ).fetchone()
+        close = close_by_decision.get(int(hold["decision_id"])) if hold["decision_id"] is not None else None
         if close is None: continue
         state = json.loads(hold["features_json"])
         values = feature_map(state, str(hold["outcome"]), hold["current_bid"], hold["shares"], hold["cost_usdc"])
         exit_pairs.append({
             "event": str(hold["event_slug"]), "outcome": str(hold["outcome"]),
-            "x": exit_vector(values), "advantage": float(close[0])-float(hold["net_pnl_usdc"]),
+            "x": exit_vector(values), "advantage": float(close)-float(hold["net_pnl_usdc"]),
         })
     db.close(); return entries, exit_pairs
 
@@ -106,12 +117,15 @@ def _scores(models, rows):
     fill,value,risk=models; x=np.asarray([r["x"] for r in rows])
     pfill=fill.predict_proba(x)[:,1]; ev=pfill*value.predict(x); ptail=risk.predict_proba(x)[:,1]
     tail_exposure=pfill*ptail*np.asarray([r["notional"] for r in rows])
-    return ev,ptail,tail_exposure
+    return ev,ptail,tail_exposure,pfill,value.predict(x)
 
 
-def _ranked(rows, scores, tails):
+def _ranked(rows, scores, tails, fill_probabilities=None, conditional_values=None):
     grouped=defaultdict(list)
-    for row,score,tail in zip(rows,scores,tails,strict=True): grouped[row["event"]].append((row,float(score),float(tail)))
+    if fill_probabilities is None: fill_probabilities=np.ones(len(rows))
+    if conditional_values is None: conditional_values=np.zeros(len(rows))
+    for row,score,tail,pfill,conditional in zip(rows,scores,tails,fill_probabilities,conditional_values,strict=True):
+        grouped[row["event"]].append((row,float(score),float(tail),float(pfill),float(conditional)))
     ranked={}
     for event,candidates in grouped.items():
         by_time=defaultdict(list)
@@ -120,20 +134,33 @@ def _ranked(rows, scores, tails):
     return ranked
 
 
-def _policy(ranked, threshold, max_tail_probability, exit_models, future):
+def _policy(ranked, threshold, max_tail_probability, exit_models, future, adaptive_sizing=False):
     pnls=[]; hold_pnls=[]; directions=defaultdict(int); closes=0; nonfills=0
     for event, candidates in ranked.items():
         chosen=None
-        for row,score,tail in candidates:
+        for row,score,tail,pfill,conditional in candidates:
             elapsed=_time(row["observed"])-int(event.rsplit('-',1)[-1])
-            if not settings.PAPER_MIN_ENTRY_SECONDS_AFTER_OPEN<=elapsed<=300-settings.PAPER_LAST_ENTRY_SECONDS_BEFORE_CLOSE:continue
-            if score>=threshold and tail<=max_tail_probability: chosen=(row,score,tail);break
+            if settings.MODEL_TIME_GATES_ENABLED and not settings.PAPER_MIN_ENTRY_SECONDS_AFTER_OPEN<=elapsed<=300-settings.PAPER_LAST_ENTRY_SECONDS_BEFORE_CLOSE:continue
+            if score>=threshold and tail<=max_tail_probability: chosen=(row,score,tail,pfill,conditional);break
         if chosen is None:continue
-        row=chosen[0]
+        row,score,tail,pfill,conditional=chosen
         if not row["filled"]: nonfills+=1;continue
-        hold=float(row["pnl"]); realized=hold
+        scale=1.0
+        if adaptive_sizing:
+            base=float(row["notional"]);price=float(row["fill_price"])
+            # Восстанавливаем model-implied P(win) из условного net PnL; clamp
+            # не позволяет sizing использовать невозможную вероятность.
+            fee=total_fee_usdc(base/max(price,1e-6),price)
+            implied_probability=max(0.0,min(1.0,(conditional+base+fee)*price/base))
+            selected=position_notional(
+                max(0.0,implied_probability-price), score,
+                win_probability=implied_probability,entry_price=price,fill_probability=pfill,
+            )
+            if selected<=0:continue
+            scale=selected/base
+        hold=float(row["pnl"])*scale; realized=hold
         if exit_models:
-            classifier,value=exit_models; shares=row["notional"]/row["fill_price"]
+            classifier,value=exit_models; shares=row["notional"]*scale/row["fill_price"]
             for tick in future.get((event,row["outcome"]),[]):
                 if _time(tick["observed"])<=_time(row["observed"]):continue
                 bid=tick["features"].get("best_bid")
@@ -141,7 +168,7 @@ def _policy(ranked, threshold, max_tail_probability, exit_models, future):
                 values=feature_map(tick["features"],row["outcome"],bid,shares,row["notional"])
                 x=np.asarray([exit_vector(values)])
                 if classifier.predict_proba(x)[0,1]>=0.65 and value.predict(x)[0]>=settings.EXIT_VALUE_MARGIN_USDC:
-                    realized=shares*float(bid)-row["notional"]-total_fee_usdc(shares,float(bid));closes+=1;break
+                    realized=shares*float(bid)-row["notional"]*scale-total_fee_usdc(shares,float(bid));closes+=1;break
         pnls.append(realized);hold_pnls.append(hold);directions[row["outcome"]]+=1
     return {"trades":len(pnls),"net_pnl":sum(pnls),"expectancy":mean(pnls) if pnls else 0.0,
             "hold_net_pnl":sum(hold_pnls),"exit_vs_hold":sum(pnls)-sum(hold_pnls),"early_closes":closes,
@@ -159,10 +186,10 @@ def run(path:Path,min_train:int=300,validation_events:int=100,fold_events:int=10
     for start in starts[len(folds):]:
         train_events=set(events[:start-validation_events]); valid_events=set(events[start-validation_events:start]); test_events=set(events[start:start+fold_events])
         train=[r for r in entries if r["event"] in train_events]; valid=[r for r in entries if r["event"] in valid_events]; test=[r for r in entries if r["event"] in test_events]
-        models=_fit_entry(train); vbase,vt,vexposure=_scores(models,valid); tbase,tt,texposure=_scores(models,test)
+        models=_fit_entry(train); vbase,vt,vexposure,vfill,vconditional=_scores(models,valid); tbase,tt,texposure,tfill,tconditional=_scores(models,test)
         choices=[]
         for penalty in (0.0,0.10,0.25,0.50,0.75,1.0):
-            valid_ranked=_ranked(valid,vbase-penalty*vexposure,vt)
+            valid_ranked=_ranked(valid,vbase-penalty*vexposure,vt,vfill,vconditional)
             for max_tail in (0.35,0.50,0.75,1.0):
                 for threshold in np.arange(-0.5,1.51,0.1):
                     m=_policy(valid_ranked,float(threshold),max_tail,None,{})
@@ -172,20 +199,28 @@ def run(path:Path,min_train:int=300,validation_events:int=100,fold_events:int=10
             _,_,penalty,max_tail,threshold=max(choices)
         else:
             penalty,max_tail,threshold=0.0,1.0,2.0
-        test_ranked=_ranked(test,tbase-penalty*texposure,tt)
+        test_ranked=_ranked(test,tbase-penalty*texposure,tt,tfill,tconditional)
         exit_models=_fit_exit([r for r in exit_rows if r["event"] in train_events])
         future=_load_future(path,test_events) if exit_models else {}
+        fixed=_policy(test_ranked,float(threshold),float(max_tail),exit_models,future)
+        adaptive=_policy(test_ranked,float(threshold),float(max_tail),exit_models,future,adaptive_sizing=True)
         folds.append({"test_events":len(test_events),"threshold":float(threshold),
                       "tail_penalty":float(penalty),"max_tail_probability":float(max_tail),
-                      **_policy(test_ranked,float(threshold),float(max_tail),exit_models,future)})
+                      **fixed,"adaptive_sizing":adaptive})
         settings.WALK_FORWARD_V9_REPORT_PATH.write_text(json.dumps({"status":"running","folds":folds},ensure_ascii=False,indent=2),encoding="utf-8")
         del train,valid,test,models,valid_ranked,test_ranked,exit_models,future
         gc.collect()
-    report={"version":"entry_value_v4_tail_risk_full_chain","protocol":"expanding temporal walk-forward; GTD labels; fees; tail gate; future-book CLOSE/HOLD; untouched test folds",
+    report={"version":"entry_value_v4_tail_risk_full_chain","protocol":"expanding temporal walk-forward; one observation per 5-second event bucket; GTD labels; fees; tail gate; future-book CLOSE/HOLD; untouched test folds",
             "events":len(events),"folds":folds,"total_test_events":sum(f["test_events"] for f in folds),
             "total_trades":sum(f["trades"] for f in folds),"total_net_pnl":sum(f["net_pnl"] for f in folds),
             "total_hold_pnl":sum(f["hold_net_pnl"] for f in folds),"exit_vs_hold":sum(f["exit_vs_hold"] for f in folds),
-            "positive_folds":sum(f["net_pnl"]>0 for f in folds)}
+            "positive_folds":sum(f["net_pnl"]>0 for f in folds),
+            "comparison": {
+                "hold_fixed_pnl": sum(f["hold_net_pnl"] for f in folds),
+                "learned_exit_fixed_pnl": sum(f["net_pnl"] for f in folds),
+                "learned_exit_adaptive_sizing_pnl": sum(f["adaptive_sizing"]["net_pnl"] for f in folds),
+                "adaptive_positive_folds": sum(f["adaptive_sizing"]["net_pnl"]>0 for f in folds),
+            }}
     report["promotion_gate"]={"passed":bool(len(folds)>=5 and report["positive_folds"]/len(folds)>=.8 and report["total_net_pnl"]>0 and report["exit_vs_hold"]>=0 and min(sum(f["up"] for f in folds),sum(f["down"] for f in folds))>=30),
                               "candidate_only":True,"requirements":">=5 folds; >=80% positive; total PnL>0; exit>=HOLD; >=30 Up and Down"}
     settings.WALK_FORWARD_V9_REPORT_PATH.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8");return report

@@ -20,13 +20,28 @@ class EventSummary:
     distance_range_pct: float
     mean_volatility_pct: float
     reference_return_pct: float
+    distance_at_30s_pct: float
+    distance_at_60s_pct: float
+    distance_at_120s_pct: float
+    distance_at_180s_pct: float
+    distance_at_240s_pct: float
+    distance_at_285s_pct: float
+    target_crossings: int
+    max_positive_distance_pct: float
+    max_negative_distance_pct: float
 
 
 BASE_HISTORY_METRICS = (
     "available_fraction", "up_rate", "flip_rate", "last_up", "signed_streak",
     "mean_final_distance_pct", "mean_abs_final_distance_pct", "mean_distance_range_pct",
-    "mean_volatility_pct", "mean_reference_return_pct", "gap_seconds",
+    "mean_volatility_pct", "mean_reference_return_pct", "mean_target_crossings",
+    "mean_max_positive_distance_pct", "mean_max_negative_distance_pct",
+    "mean_distance_at_30s_pct", "mean_distance_at_60s_pct", "mean_distance_at_120s_pct",
+    "mean_distance_at_180s_pct", "mean_distance_at_240s_pct", "mean_distance_at_285s_pct",
+    "gap_seconds",
 )
+
+PATH_CHECKPOINTS = (30, 60, 120, 180, 240, 285)
 
 
 def feature_names(windows: Iterable[int]) -> list[str]:
@@ -61,15 +76,35 @@ def build_summaries(rows: Iterable[Any]) -> list[EventSummary]:
     for slug, items in grouped.items():
         items.sort(key=lambda item: item[0])
         distances = [_number(item[2].get("distance_to_target_pct")) for item in items]
+        start = event_start(slug)
+        elapsed = []
+        for observed, _, features in items:
+            value = features.get("elapsed_seconds")
+            if value is None:
+                value = datetime.fromisoformat(observed).timestamp() - start
+            elapsed.append(max(0.0, min(300.0, _number(value))))
+        checkpoints = {
+            second: distances[min(range(len(items)), key=lambda index: abs(elapsed[index] - second))]
+            if items else 0.0
+            for second in PATH_CHECKPOINTS
+        }
+        signs = [1 if value > 0 else -1 if value < 0 else 0 for value in distances]
+        target_crossings = sum(
+            signs[index] and signs[index - 1] and signs[index] != signs[index - 1]
+            for index in range(1, len(signs))
+        )
         references = [_number(item[2].get("reference_price")) for item in items]
         references = [value for value in references if value > 0]
         reference_return = (references[-1] / references[0] - 1.0) * 100.0 if len(references) >= 2 else 0.0
-        start = event_start(slug)
         summaries.append(EventSummary(
             slug, start, start + 300, int(items[-1][1]), distances[-1] if distances else 0.0,
             (max(distances) - min(distances)) if distances else 0.0,
             sum(_number(item[2].get("realized_volatility_60s_pct")) for item in items) / max(1, len(items)),
             reference_return,
+            *(checkpoints[second] for second in PATH_CHECKPOINTS),
+            target_crossings,
+            max(distances) if distances else 0.0,
+            min(distances) if distances else 0.0,
         ))
     return sorted(summaries, key=lambda item: item.start_ts)
 
@@ -106,6 +141,15 @@ def context(summaries: list[EventSummary], event_slug: str, observed_at: str, wi
             prefix + "mean_distance_range_pct": sum(x.distance_range_pct for x in selected) / max(1, len(selected)),
             prefix + "mean_volatility_pct": sum(x.mean_volatility_pct for x in selected) / max(1, len(selected)),
             prefix + "mean_reference_return_pct": sum(x.reference_return_pct for x in selected) / max(1, len(selected)),
+            prefix + "mean_target_crossings": sum(x.target_crossings for x in selected) / max(1, len(selected)),
+            prefix + "mean_max_positive_distance_pct": sum(x.max_positive_distance_pct for x in selected) / max(1, len(selected)),
+            prefix + "mean_max_negative_distance_pct": sum(x.max_negative_distance_pct for x in selected) / max(1, len(selected)),
+            **{
+                prefix + f"mean_distance_at_{second}s_pct": sum(
+                    getattr(x, f"distance_at_{second}s_pct") for x in selected
+                ) / max(1, len(selected))
+                for second in PATH_CHECKPOINTS
+            },
             prefix + "gap_seconds": max(0.0, observed_ts - selected[-1].end_ts) if selected else 86_400.0,
         })
     return result

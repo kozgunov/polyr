@@ -9,7 +9,7 @@ import joblib
 
 from polybot.models.counterfactual_actions import action_vector
 from polybot.models.train_direction_model import vector
-from polybot.trading.fees import total_fee_usdc
+from polybot.trading.fees import state_fee_usdc, total_fee_usdc
 from polybot.trading.policy import MarketState
 
 
@@ -61,7 +61,7 @@ def _predict_fill(artifact, row) -> float:
 
 def expected_pnl(state: MarketState, outcome: str, probability: float, price: float, notional: float) -> tuple[float, dict]:
     shares = notional / price
-    analytical = shares * probability - notional - total_fee_usdc(shares, price)
+    analytical = shares * probability - notional - state_fee_usdc(state, shares, price)
     artifact = _artifact() if settings.ACTION_VALUE_ENABLED else None
     learned = None
     learned_fill_probability = None
@@ -94,7 +94,7 @@ def expected_pnl(state: MarketState, outcome: str, probability: float, price: fl
                 if directional is not None:
                     win_probability = float(directional.predict_proba([[win_logit]])[0, 1])
                 shares = notional / price
-                learned_pnl_if_filled = shares * win_probability - notional - total_fee_usdc(shares, price)
+                learned_pnl_if_filled = shares * win_probability - notional - state_fee_usdc(state, shares, price)
             else:
                 learned_pnl_if_filled = float(artifact["conditional_pnl_model"].predict([row])[0])
                 if artifact.get("conditional_target") == "net_return_per_usdc":
@@ -133,9 +133,42 @@ def expected_pnl(state: MarketState, outcome: str, probability: float, price: fl
     }
 
 
-def position_notional(net_edge: float, expected_pnl_usdc: float) -> float:
+def position_notional(
+    net_edge: float,
+    expected_pnl_usdc: float,
+    *,
+    win_probability: float | None = None,
+    entry_price: float | None = None,
+    fill_probability: float | None = None,
+) -> float:
     if not settings.ADAPTIVE_POSITION_SIZING_ENABLED:
         return settings.PAPER_ENTRY_NOTIONAL_USDC
+    if (
+        settings.POSITION_SIZING_MODE == "calibrated_fractional_kelly_v1"
+        and win_probability is not None
+        and entry_price is not None
+        and 0 < entry_price < 1
+    ):
+        probability = max(0.0, min(1.0, float(win_probability)))
+        fill = max(0.0, min(1.0, float(fill_probability if fill_probability is not None else 1.0)))
+        # Для бинарного контракта Kelly = (p-price)/(1-price). Используем только
+        # малую долю Kelly и дополнительно уменьшаем риск вероятностью fill.
+        full_kelly = max(0.0, (probability - float(entry_price)) / max(1e-6, 1.0 - float(entry_price)))
+        risk_fraction = min(
+            1.0,
+            full_kelly ** float(settings.POSITION_SIZE_KELLY_POWER)
+            * float(settings.POSITION_SIZE_KELLY_FRACTION),
+        )
+        risk_fraction *= fill ** float(settings.POSITION_SIZE_FILL_EXPONENT)
+        selected = float(settings.PAPER_MAX_EVENT_EXPOSURE_USDC) * risk_fraction
+        # Явно ограничиваем ожидаемый полный проигрыш, а не цену контракта как таковую.
+        expected_loss_rate = max(1e-6, 1.0 - probability)
+        selected = min(selected, float(settings.POSITION_SIZE_MAX_EXPECTED_LOSS_USDC) / expected_loss_rate)
+        if selected > 0:
+            selected = max(float(settings.POSITION_SIZE_MIN_USDC), selected)
+        if expected_pnl_usdc < settings.ACTION_VALUE_MIN_EXPECTED_PNL_USDC:
+            return 0.0
+        return min(selected, settings.PAPER_MAX_EVENT_EXPOSURE_USDC, settings.MAX_POSITION_USDC)
     selected = 0.0
     for threshold, size in settings.POSITION_SIZE_EDGE_TIERS:
         if net_edge >= threshold:

@@ -8,7 +8,8 @@ from typing import Any
 
 import app_config as settings
 
-from polybot.models.action_value import expected_pnl
+from polybot.models.action_value import expected_pnl, position_notional
+from polybot.trading.fees import net_buy_edge
 from polybot.models.exit_value import compare as compare_exit_value
 from polybot.trading.policy import Decision, MarketState, PositionState
 
@@ -35,10 +36,13 @@ def _technical_guard(state: MarketState, position: PositionState | None) -> Deci
             return Decision(passive, 0.0, f"Снимок рынка устарел на {age:.1f} сек", ["ml_policy", "stale_market_data"])
     if position is not None and position.event_slug != state.event_slug:
         return Decision("HOLD", 0.0, "Позиция ожидает официального расчёта", ["ml_policy", "awaiting_resolution"])
-    if position is None and state.remaining_seconds <= settings.PAPER_LAST_ENTRY_SECONDS_BEFORE_CLOSE:
-        return Decision("WAIT", 0.0, "Окно входа в событие уже закрыто", ["ml_policy", "entry_window_closed"])
-    if position is None and state.remaining_seconds > 300 - settings.PAPER_MIN_ENTRY_SECONDS_AFTER_OPEN:
-        return Decision("WAIT", 0.0, "Ожидаем открытия разрешённого окна входа", ["ml_policy", "entry_window_not_open"])
+    if state.remaining_seconds <= 0:
+        return Decision(passive, 0.0, "Событие уже завершено", ["ml_policy", "event_ended"])
+    if position is None and settings.MODEL_TIME_GATES_ENABLED:
+        if state.remaining_seconds <= settings.PAPER_LAST_ENTRY_SECONDS_BEFORE_CLOSE:
+            return Decision("WAIT", 0.0, "Окно входа в событие уже закрыто", ["ml_policy", "entry_window_closed"])
+        if state.remaining_seconds > 300 - settings.PAPER_MIN_ENTRY_SECONDS_AFTER_OPEN:
+            return Decision("WAIT", 0.0, "Ожидаем открытия разрешённого окна входа", ["ml_policy", "entry_window_not_open"])
     return None
 
 
@@ -69,8 +73,13 @@ def decide(
             f"policy_confidence={confidence:.6f}",
         ])
         if bool(result.get("exit")):
-            return Decision("CLOSE", confidence, f"Exit-модель выбрала CLOSE: преимущество над HOLD {close_utility:+.3f}", tags,
-                            direction=position.outcome, exit_fraction=1.0)
+            # Чем сильнее преимущество CLOSE над HOLD, тем большую часть позиции
+            # закрываем. Это модельный sizing выхода, а не переворот направления.
+            fraction = 1.0 if close_utility >= max(0.50, position.cost_usdc * 0.12) else 0.50
+            action = "CLOSE" if fraction >= 1.0 else "PARTIAL_CLOSE"
+            return Decision(action, confidence, f"Exit-модель выбрала {action}: преимущество над HOLD {close_utility:+.3f}",
+                            [*tags, "limit_exit", "flip_disabled", f"exit_fraction={fraction:.2f}"],
+                            direction=position.outcome, exit_fraction=fraction)
         return Decision("HOLD", confidence, f"Exit-модель выбрала HOLD: оценка CLOSE против HOLD {close_utility:+.3f}", tags)
 
     direction = max(("Up", "Down"), key=lambda outcome: float(probabilities.get(outcome, 0.0)))
@@ -121,20 +130,40 @@ def decide(
             if raw_price is None:
                 continue
             price = float(raw_price)
-            if not 0.0 < price < 1.0:
+            if not settings.PAPER_MIN_ENTRY_PRICE <= price <= settings.PAPER_MAX_ENTRY_PRICE:
                 continue
-            for raw_notional in settings.ML_POLICY_NOTIONALS_USDC:
-                notional = min(float(raw_notional), settings.PAPER_MAX_EVENT_EXPOSURE_USDC, settings.MAX_POSITION_USDC)
-                utility, parts = expected_pnl(state, outcome, probabilities[outcome], price, notional)
-                if notional >= 5.0 and (
-                    float(probabilities[outcome]) < settings.ML_POLICY_FIVE_DOLLAR_MIN_OUTCOME_PROBABILITY
-                    or float(utility) < settings.ML_POLICY_FIVE_DOLLAR_MIN_UTILITY_USDC
-                ):
-                    continue
-                candidates.append({
-                    "action": f"BUY_{outcome.upper()}", "utility": float(utility), "direction": outcome,
-                    "price": price, "notional": notional, "level": level, "parts": parts,
-                })
+            probe_utility, probe_parts = expected_pnl(
+                state, outcome, probabilities[outcome], price, settings.PAPER_ENTRY_NOTIONAL_USDC,
+            )
+            notional = position_notional(
+                net_buy_edge(probabilities[outcome], price), probe_utility,
+                win_probability=probabilities[outcome], entry_price=price,
+                fill_probability=probe_parts.get("fill_probability"),
+            )
+            # Модель выбирает риск, но заявка должна оставаться исполнимой в CLOB.
+            # Для BTC 5m минимум обычно равен 5 контрактам; при недоступной метаинформации
+            # используем тот же консервативный fallback. Это не форсирует максимум $10.
+            minimum_shares = max(
+                float(state.minimum_order_size or 0.0),
+                float(settings.DEFAULT_CLOB_MIN_ORDER_SIZE_SHARES),
+            )
+            minimum_notional = max(float(settings.POSITION_SIZE_MIN_USDC), minimum_shares * price)
+            if notional > 0:
+                notional = max(float(notional), minimum_notional)
+                notional = min(
+                    notional,
+                    float(settings.PAPER_MAX_EVENT_EXPOSURE_USDC),
+                    float(settings.MAX_POSITION_USDC),
+                )
+            if notional + 1e-9 < minimum_notional:
+                continue
+            if notional <= 0:
+                continue
+            utility, parts = expected_pnl(state, outcome, probabilities[outcome], price, notional)
+            candidates.append({
+                "action": f"BUY_{outcome.upper()}", "utility": float(utility), "direction": outcome,
+                "price": price, "notional": notional, "level": level, "parts": parts,
+            })
     if not candidates:
         return Decision(
             "WAIT", max(0.0, min(1.0, direction_probability)),

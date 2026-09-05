@@ -34,7 +34,11 @@ def _number(value: Any) -> float:
         return 0.0
 
 
-def build(database: Path = settings.DATABASE_PATH, output: Path = settings.SEQUENCE_DATASET_PATH) -> dict[str, Any]:
+def build(
+    database: Path = settings.DATABASE_PATH,
+    output: Path = settings.SEQUENCE_DATASET_PATH,
+    manifest_path: Path | None = None,
+) -> dict[str, Any]:
     connection = sqlite3.connect(database)
     connection.row_factory = sqlite3.Row
     rows = connection.execute(
@@ -157,7 +161,9 @@ def build(database: Path = settings.DATABASE_PATH, output: Path = settings.SEQUE
             "fill_up/fill_down зарезервированы до накопления честных limit-order fill labels"
         ] if not any(record.get("fill_up") is not None or record.get("fill_down") is not None for record in records) else [],
     }
-    settings.SEQUENCE_DATASET_MANIFEST_PATH.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest_path = manifest_path or settings.SEQUENCE_DATASET_MANIFEST_PATH
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest
 
 
