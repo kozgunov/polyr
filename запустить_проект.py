@@ -204,11 +204,13 @@ def request_trading_mode(mode: str) -> dict[str, object] | None:
     raise RuntimeError(f"Не удалось включить режим {mode}: {last_error}")
 
 
-def warm_dashboard_overview() -> None:
-    """Один раз строит тяжёлую сводку до открытия браузера; дальше работает минутный кэш."""
-    with urllib.request.urlopen(f"{DASHBOARD_URL}/api/overview", timeout=90) as response:
-        if response.status != 200:
-            raise RuntimeError(f"Сводка дашборда не готова: HTTP {response.status}")
+def warm_dashboard_overview() -> bool:
+    """Запускает прогрев, но не объявляет весь проект упавшим из-за тяжёлой аналитики."""
+    try:
+        with urllib.request.urlopen(f"{DASHBOARD_URL}/api/overview", timeout=12) as response:
+            return response.status == 200
+    except (TimeoutError, OSError, urllib.error.URLError):
+        return False
 
 
 def main() -> None:
@@ -240,7 +242,8 @@ def main() -> None:
     mode_result = request_trading_mode(args.mode)
     if mode_result is not None:
         print(f"Торговый режим: {json.dumps(mode_result, ensure_ascii=False)}", flush=True)
-    warm_dashboard_overview()
+    if not warm_dashboard_overview():
+        print("Dashboard запущен; тяжёлая аналитика догружается в фоне", flush=True)
     print(f"Проект запущен: {DASHBOARD_URL}", flush=True)
     if not args.no_browser:
         webbrowser.open(DASHBOARD_URL)

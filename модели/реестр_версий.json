@@ -6199,5 +6199,144 @@
       }
     },
     "deployment_state": "candidate_not_activated"
+  },
+  {
+    "version": "exit_sequence_v20_exit_v0001",
+    "model": "exit_sequence_v20",
+    "role": "exit",
+    "created_at": "2026-09-05T12:47:16.352990+00:00",
+    "artifacts": [
+      {
+        "file": "exit_sequence_v20.joblib",
+        "sha256": "4c9acc3cc1fa60719150f646e7585e725bef800f228abec83916e34cbb2d6bb5",
+        "size": 1346545
+      },
+      {
+        "file": "exit_sequence_report.json",
+        "sha256": "9ad2d5bcbb46d476bdfb0f3841b690577dee6e9000210374491c0314bbcdc470",
+        "size": 3359
+      }
+    ],
+    "metadata": {
+      "schema_version": 5,
+      "created_at": "2026-09-05T12:47:15.857833+00:00",
+      "target": "close_advantage_vs_best_wait_usdc",
+      "decision_semantics": "first causal CLOSE_NOW trigger versus best of later exit and HOLD, evaluated after fees",
+      "features": [
+        "seconds_in_position",
+        "remaining_seconds",
+        "current_bid",
+        "average_price",
+        "marked_return",
+        "oriented_distance_to_target_pct",
+        "momentum_bid_3ticks",
+        "momentum_distance_3ticks",
+        "momentum_bid_15s",
+        "momentum_bid_30s",
+        "momentum_bid_60s",
+        "bid_slope_15s",
+        "bid_slope_30s",
+        "target_distance_available",
+        "peak_bid_since_entry",
+        "trough_bid_since_entry",
+        "drawdown_from_peak",
+        "recovery_from_trough",
+        "seconds_since_peak",
+        "maximum_favorable_excursion",
+        "maximum_adverse_excursion",
+        "spread",
+        "log_bid_size",
+        "log_ask_size",
+        "shares",
+        "original_cost_usdc"
+      ],
+      "rows": 3708,
+      "events": 553,
+      "selected_policy": {
+        "probability_threshold": 1.01,
+        "advantage_threshold": Infinity,
+        "positions": 111,
+        "closes": 7,
+        "close_precision": 1.0,
+        "policy_pnl_usdc": -28.000027486013085,
+        "hold_pnl_usdc": -32.00732811534353,
+        "advantage_vs_hold_usdc": 4.00730062933045,
+        "selected_advantage_mean_usdc": 0.5724715184757786,
+        "up_closes": 7,
+        "down_closes": 0
+      },
+      "shadow_policy": {
+        "probability_threshold": 0.55,
+        "advantage_threshold": -0.04999999999999999,
+        "positions": 111,
+        "closes": 7,
+        "close_precision": 1.0,
+        "policy_pnl_usdc": -28.000027486013085,
+        "hold_pnl_usdc": -32.00732811534353,
+        "advantage_vs_hold_usdc": 4.00730062933045,
+        "selected_advantage_mean_usdc": 0.5724715184757786,
+        "up_closes": 7,
+        "down_closes": 0
+      },
+      "train": {
+        "positions": 344,
+        "closes": 0,
+        "close_precision": 0.0,
+        "policy_pnl_usdc": 74.75843341513688,
+        "hold_pnl_usdc": 74.75843341513688,
+        "advantage_vs_hold_usdc": 0.0,
+        "selected_advantage_mean_usdc": 0.0,
+        "up_closes": 0,
+        "down_closes": 0,
+        "rows": 2215,
+        "events": 331,
+        "roc_auc": 0.9527214115364405,
+        "pr_auc": 0.8158047237535002,
+        "brier": 0.05805398990088837,
+        "up_rows": 1000,
+        "down_rows": 1215
+      },
+      "validation": {
+        "positions": 111,
+        "closes": 0,
+        "close_precision": 0.0,
+        "policy_pnl_usdc": -32.00732811534353,
+        "hold_pnl_usdc": -32.00732811534353,
+        "advantage_vs_hold_usdc": 0.0,
+        "selected_advantage_mean_usdc": 0.0,
+        "up_closes": 0,
+        "down_closes": 0,
+        "rows": 742,
+        "events": 111,
+        "roc_auc": 0.8795625942684767,
+        "pr_auc": 0.5277768648410258,
+        "brier": 0.10349992341263534,
+        "up_rows": 522,
+        "down_rows": 220
+      },
+      "test": {
+        "positions": 111,
+        "closes": 0,
+        "close_precision": 0.0,
+        "policy_pnl_usdc": -36.672496139311704,
+        "hold_pnl_usdc": -36.672496139311704,
+        "advantage_vs_hold_usdc": 0.0,
+        "selected_advantage_mean_usdc": 0.0,
+        "up_closes": 0,
+        "down_closes": 0,
+        "rows": 751,
+        "events": 111,
+        "roc_auc": 0.8649604433264064,
+        "pr_auc": 0.48367805377759626,
+        "brier": 0.07540977789732418,
+        "up_rows": 286,
+        "down_rows": 465
+      },
+      "promotion_gate": {
+        "passed": false,
+        "candidate_only": true
+      }
+    },
+    "deployment_state": "candidate_not_activated"
   }
 ]
