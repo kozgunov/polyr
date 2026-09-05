@@ -1241,8 +1241,9 @@ class PaperEngine:
                 if delta > 0:
                     self.db.execute(
                         "UPDATE live_orders SET matched_size=?,average_fill_price=?,fill_notional_usdc=?,"
-                        "fill_source='clob_order_cumulative',last_checked_at=?,error=NULL WHERE id=?",
-                        (matched, price, float(fill_summary.get("notional", matched * price)), now(), row["id"]),
+                        "fill_source=?,last_checked_at=?,error=NULL WHERE id=?",
+                        (matched, price, float(fill_summary.get("notional", matched * price)),
+                         "clob_trade_history" if fill_summary else "clob_order_cumulative_fallback", now(), row["id"]),
                     )
                     self.db.execute("UPDATE live_orders SET fee_usdc=? WHERE id=?",
                                     (float(fill_summary.get("fee", 0)), row["id"]))
