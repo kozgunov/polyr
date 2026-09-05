@@ -221,13 +221,14 @@ def latest_sources(connection: sqlite3.Connection) -> list[dict[str, Any]]:
         return []
     enabled = [name for name, flag in (("bybit", settings.ENABLE_BYBIT), ("okx", settings.ENABLE_OKX),
                                         ("pyth", settings.ENABLE_PYTH)) if flag]
-    placeholders = ",".join("?" for _ in enabled)
-    rows = connection.execute(
-        f"""SELECT p.source,p.price,p.confidence,p.collected_at,p.source_timestamp
-            FROM external_prices p JOIN (
-              SELECT source,MAX(id) id FROM external_prices WHERE source IN ({placeholders}) GROUP BY source
-            ) x ON p.id=x.id ORDER BY p.source""", enabled,
-    ).fetchall() if enabled else []
+    rows = []
+    for source in enabled:
+        row = connection.execute(
+            """SELECT source,price,confidence,collected_at,source_timestamp
+               FROM external_prices WHERE source=? ORDER BY collected_at DESC LIMIT 1""", (source,),
+        ).fetchone()
+        if row:
+            rows.append(row)
     return [{**dict(row), "age_seconds": age_seconds(row["collected_at"])} for row in rows]
 
 
@@ -249,12 +250,13 @@ def current_target(connection: sqlite3.Connection, slug: str | None) -> dict[str
     target_price = float(target["target_price"])
     enabled = [name for name, flag in (("bybit", settings.ENABLE_BYBIT), ("okx", settings.ENABLE_OKX),
                                         ("pyth", settings.ENABLE_PYTH)) if flag]
-    placeholders = ",".join("?" for _ in enabled)
-    external_rows = connection.execute(
-        f"""SELECT p.price FROM external_prices p JOIN (
-              SELECT source,MAX(id) id FROM external_prices WHERE source IN ({placeholders}) GROUP BY source
-            ) x ON p.id=x.id""", enabled,
-    ).fetchall() if enabled else []
+    external_rows = []
+    for source in enabled:
+        row = connection.execute(
+            "SELECT price FROM external_prices WHERE source=? ORDER BY collected_at DESC LIMIT 1", (source,),
+        ).fetchone()
+        if row:
+            external_rows.append(row)
     external_prices = sorted(float(row[0]) for row in external_rows)
     external_median = external_prices[len(external_prices) // 2] if external_prices else None
     reference_price = float(reference["reference_price"]) if reference else external_median
@@ -630,7 +632,8 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
         cf = connection.execute(
             """SELECT COUNT(*),COALESCE(AVG(counterfactual_pnl_usdc),0),
                       COALESCE(SUM(CASE WHEN counterfactual_pnl_usdc>0 THEN counterfactual_pnl_usdc ELSE 0 END),0)
-               FROM counterfactual_entries WHERE status='evaluated'"""
+               FROM (SELECT counterfactual_pnl_usdc FROM counterfactual_entries
+                     WHERE status='evaluated' ORDER BY id DESC LIMIT 1000)"""
         ).fetchone()
         counterfactual = {"evaluated": int(cf[0]), "average_pnl": float(cf[1]), "missed_positive_pnl": float(cf[2])}
     total_wagered = sum(float(row.get("cost_usdc") or 0) for row in valid_positions)
@@ -1159,6 +1162,18 @@ def health() -> dict[str, Any]:
     return {"status": "ok", "database": settings.DATABASE_PATH.exists(), "time": datetime.now(UTC).isoformat()}
 
 
+def _fast_table_counts(connection: sqlite3.Connection, tables: list[str]) -> dict[str, int]:
+    """Даёт O(1) оперативные оценки без полного сканирования многогигабайтных таблиц."""
+    result: dict[str, int] = {}
+    for table in tables:
+        try:
+            row = connection.execute(f'SELECT MAX(rowid) FROM "{table}"').fetchone()
+            result[table] = int(row[0] or 0)
+        except sqlite3.OperationalError:
+            result[table] = 0
+    return result
+
+
 @app.get("/api/overview")
 @_cached(15.0)
 def overview() -> dict[str, Any]:
@@ -1182,7 +1197,7 @@ def overview() -> dict[str, Any]:
     else:
         try:
             tables = table_names(connection)
-            counts = {table: count(connection, table) for table in tables}
+            counts = _fast_table_counts(connection, tables)
             latest_run = dict(connection.execute("SELECT * FROM collector_runs ORDER BY id DESC LIMIT 1").fetchone() or {}) if "collector_runs" in tables else None
             current_event = dict(connection.execute("SELECT slug,title,active,closed,end_date,fetched_at FROM events ORDER BY fetched_at DESC LIMIT 1").fetchone() or {}) if "events" in tables else None
             if current_event:

@@ -290,9 +290,11 @@ class PaperEngine:
         """Помечает невозможные исполнения, сохраняя исходную историю и raw PnL."""
         for table in ("paper_positions", "live_positions"):
             rows = self.db.execute(
-                f"SELECT id,event_slug,opened_at,average_price FROM {table}"
+                f"SELECT id,event_slug,opened_at,average_price,execution_valid,invalid_reason FROM {table}"
             ).fetchall()
             for row in rows:
+                if int(row["execution_valid"] or 0) == 0 and "duplicate_cumulative_fill_reconciliation_bug" in str(row["invalid_reason"] or ""):
+                    continue
                 try:
                     validity = validate_entry_execution(
                         str(row["event_slug"]), datetime.fromisoformat(str(row["opened_at"])),
