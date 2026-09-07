@@ -104,6 +104,7 @@ def create_snapshot(database: Path = settings.DATABASE_PATH, version: str = "v13
             "ml_notionals_usdc": settings.ML_POLICY_NOTIONALS_USDC,
             "position_size_tiers": settings.POSITION_SIZE_EDGE_TIERS,
             "partial_exit_enabled": settings.PARTIAL_EXIT_ENABLED,
+            "early_exit_execution_enabled": settings.EARLY_EXIT_EXECUTION_ENABLED,
             "exit_value_enabled": settings.EXIT_VALUE_ENABLED,
         },
     }

@@ -22,8 +22,12 @@ def policy_confidence(best: float, runner_up: float) -> float:
 
 def _technical_guard(state: MarketState, position: PositionState | None) -> Decision | None:
     passive = "HOLD" if position else "WAIT"
-    if state.target_price is None or state.reference_price is None:
-        return Decision(passive, 0.0, "Нет Price to Beat или актуальной reference-цены", ["ml_policy", "invalid_market_data"])
+    if state.target_price is None:
+        return Decision(passive, 0.0, "Не получен официальный Price to Beat для события",
+                        ["ml_policy", "invalid_market_data", "invalid_target_price"])
+    if state.reference_price is None:
+        return Decision(passive, 0.0, "Нет свежего Chainlink TWAP и fallback-медианы Bybit/OKX/Pyth",
+                        ["ml_policy", "invalid_market_data", "invalid_reference_price"])
     if settings.ML_POLICY_REQUIRE_FRESH_DATA:
         try:
             observed = datetime.fromisoformat(state.observed_at)
@@ -109,6 +113,7 @@ def decide(
         )
 
     candidates: list[dict[str, Any]] = []
+    rejected_candidates = {"missing_quote": 0, "price_range": 0, "minimum_size": 0, "zero_value": 0}
     if not collection_deadline:
         candidates.append({
             "action": "WAIT", "utility": float(settings.ML_POLICY_WAIT_UTILITY_USDC),
@@ -128,9 +133,11 @@ def decide(
         for level in settings.ML_POLICY_LIMIT_LEVELS:
             raw_price = book.get("midpoint" if level == "midpoint" else f"best_{level}")
             if raw_price is None:
+                rejected_candidates["missing_quote"] += 1
                 continue
             price = float(raw_price)
             if not settings.PAPER_MIN_ENTRY_PRICE <= price <= settings.PAPER_MAX_ENTRY_PRICE:
+                rejected_candidates["price_range"] += 1
                 continue
             probe_utility, probe_parts = expected_pnl(
                 state, outcome, probabilities[outcome], price, settings.PAPER_ENTRY_NOTIONAL_USDC,
@@ -155,20 +162,24 @@ def decide(
                     float(settings.PAPER_MAX_EVENT_EXPOSURE_USDC),
                     float(settings.MAX_POSITION_USDC),
                 )
-            if notional + 1e-9 < minimum_notional:
-                continue
             if notional <= 0:
+                rejected_candidates["zero_value"] += 1
+                continue
+            if notional + 1e-9 < minimum_notional:
+                rejected_candidates["minimum_size"] += 1
                 continue
             utility, parts = expected_pnl(state, outcome, probabilities[outcome], price, notional)
             candidates.append({
                 "action": f"BUY_{outcome.upper()}", "utility": float(utility), "direction": outcome,
                 "price": price, "notional": notional, "level": level, "parts": parts,
             })
-    if not candidates:
+    buy_candidates = [candidate for candidate in candidates if candidate["action"].startswith("BUY_")]
+    if not buy_candidates:
+        rejection_text = ", ".join(f"{name}={count}" for name, count in rejected_candidates.items() if count)
         return Decision(
             "WAIT", max(0.0, min(1.0, direction_probability)),
-            "Активный PAPER-сбор не нашёл исполнимой лимитной цены",
-            [*tags, "paper_active_collection_no_executable_candidate"],
+            "Нет допустимого BUY-кандидата: лимитные уровни отсутствуют, вне диапазона цены или меньше CLOB minimum",
+            [*tags, "ml_entry_argmax", "ml_no_buy_candidate", f"candidate_rejections={rejection_text or 'none'}"],
             direction=direction,
         )
     ranked = sorted(candidates, key=lambda item: item["utility"], reverse=True)

@@ -7,7 +7,7 @@ import asyncio
 import json
 import sqlite3
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
@@ -160,22 +160,33 @@ class Storage:
             self._cache_started = time.monotonic()
             return 0
         pending, self._write_cache = self._write_cache, []
-        for attempt in range(settings.SQLITE_WRITE_RETRY_ATTEMPTS):
-            try:
-                for query, values in pending:
-                    self.db.execute(query, values)
-                self.db.commit()
-                break
-            except sqlite3.OperationalError as error:
-                self.db.rollback()
-                if "locked" not in str(error).lower() or attempt + 1 >= settings.SQLITE_WRITE_RETRY_ATTEMPTS:
+        attempts = settings.COLLECTOR_FLUSH_RETRY_ATTEMPTS
+        self.db.execute(f"PRAGMA busy_timeout={settings.COLLECTOR_FLUSH_BUSY_TIMEOUT_MS}")
+        try:
+            for attempt in range(attempts):
+                try:
+                    for query, values in pending:
+                        self.db.execute(query, values)
+                    self.db.commit()
+                    break
+                except sqlite3.OperationalError as error:
+                    self.db.rollback()
+                    if "locked" not in str(error).lower():
+                        self._write_cache = pending + self._write_cache
+                        raise
+                    if attempt + 1 >= attempts:
+                        # Краткий lock не имеет права останавливать event loop.
+                        # Порядок сохраняется: старый пакет ставится перед новыми
+                        # тиками и будет записан следующим poll-циклом.
+                        self._write_cache = pending + self._write_cache
+                        return 0
+                    time.sleep(settings.COLLECTOR_FLUSH_RETRY_DELAY_SECONDS * (attempt + 1))
+                except Exception:
+                    self.db.rollback()
                     self._write_cache = pending + self._write_cache
                     raise
-                time.sleep(settings.SQLITE_WRITE_RETRY_DELAY_SECONDS * (attempt + 1))
-            except Exception:
-                self.db.rollback()
-                self._write_cache = pending + self._write_cache
-                raise
+        finally:
+            self.db.execute(f"PRAGMA busy_timeout={settings.SQLITE_BUSY_TIMEOUT_MS}")
         self._cache_started = time.monotonic()
         return len(pending)
 
@@ -223,9 +234,14 @@ class Collector:
         self._last_future_preview = 0.0
 
     async def discover(self, client: httpx.AsyncClient) -> None:
-        response = await client.get(f"{api.POLYMARKET_GAMMA_URL}/events/slug/{self.slug}")
-        response.raise_for_status()
-        event = response.json()
+        try:
+            response = await client.get(f"{api.POLYMARKET_GAMMA_URL}/events/slug/{self.slug}")
+            response.raise_for_status()
+            event = response.json()
+        except httpx.HTTPError:
+            if self._discover_from_cached_preview():
+                return
+            raise
         if not isinstance(event, dict) or event.get("slug") != self.slug:
             raise RuntimeError("Gamma returned an unexpected event")
         event_id = str(event["id"])
@@ -248,7 +264,7 @@ class Collector:
             if condition_id:
                 try:
                     clob_response = await client.get(
-                        f"{api.POLYMARKET_CLOB_URL}/clob-markets/{condition_id}"
+                        f"{api.POLYMARKET_CLOB_URL}/clob-markets/{condition_id}", timeout=2.0,
                     )
                     if clob_response.status_code == 200:
                         market_payload["_clob_info"] = clob_response.json()
@@ -271,10 +287,52 @@ class Collector:
                 )
         if not self.tokens:
             raise RuntimeError("No order-book tokens found")
+        # Price to Beat запускается ниже параллельно с первыми books/prices.
+        # Его auxiliary HTTP endpoint не должен задерживать техническое исполнение.
+
+    def _discover_from_cached_preview(self) -> bool:
+        """Восстанавливает token mapping из pre-open снимка при кратком сбое Gamma."""
+        cutoff = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
+        rows = self.storage.db.execute(
+            """SELECT f.next_event_title,f.next_start_time,f.market_id,f.token_id,f.outcome
+               FROM future_event_snapshots f JOIN (
+                 SELECT outcome,MAX(id) id FROM future_event_snapshots
+                 WHERE next_event_slug=? AND collected_at>=? GROUP BY outcome
+               ) latest ON f.id=latest.id ORDER BY f.outcome""",
+            (self.slug, cutoff),
+        ).fetchall()
+        if len(rows) < 2 or {str(row[4]) for row in rows} != {"Up", "Down"}:
+            return False
         try:
-            await self.collect_reference(client)
-        except (httpx.HTTPError, KeyError, TypeError, ValueError, RuntimeError) as error:
-            self.storage.raw("reference_discovery_error", self.slug, {"error": type(error).__name__})
+            epoch = int(self.slug.rsplit("-", 1)[-1])
+        except (TypeError, ValueError):
+            return False
+        self.start_time = rows[0][1] or datetime.fromtimestamp(epoch, UTC).isoformat()
+        self.end_time = datetime.fromtimestamp(epoch + 300, UTC).isoformat()
+        event_id = f"cached:{self.slug}"
+        title = rows[0][0] or self.slug
+        self.storage.buffered_write(
+            "INSERT OR REPLACE INTO events VALUES(?,?,?,?,?,?,?,?,?)",
+            (event_id, self.slug, title, 1, 0, self.end_time, "cached_preopen_preview", now(),
+             json.dumps({"source": "cached_preopen_preview"})),
+        )
+        grouped: dict[str, list[sqlite3.Row]] = {}
+        for row in rows:
+            grouped.setdefault(str(row[2]), []).append(row)
+            self.tokens.append({
+                "token_id": str(row[3]), "outcome": str(row[4]),
+                "market_id": str(row[2]),
+            })
+        for market_id, market_rows in grouped.items():
+            outcomes = [str(row[4]) for row in market_rows]
+            token_ids = [str(row[3]) for row in market_rows]
+            self.storage.buffered_write(
+                "INSERT OR REPLACE INTO markets VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (market_id, event_id, self.slug, title, 1, 0, 1, self.end_time,
+                 json.dumps(outcomes), json.dumps(token_ids), now(),
+                 json.dumps({"source": "cached_preopen_preview"})),
+            )
+        return len(self.tokens) >= 2
 
     async def collect_reference(self, client: httpx.AsyncClient) -> None:
         """Сохраняет strike (Price to Beat) и текущую цену источника расчёта."""
@@ -446,32 +504,55 @@ class Collector:
                 except (TypeError, json.JSONDecodeError): pass
 
     async def chainlink_ws(self) -> None:
-        subscription = {"action": "subscribe", "subscriptions": [{"topic": "crypto_prices_chainlink", "type": "*", "filters": json.dumps({"symbol": api.CHAINLINK_SYMBOL})}]}
-        async with websockets.connect(api.POLYMARKET_RTDS_WS, ping_interval=20) as socket:
-            await socket.send(json.dumps(subscription))
-            while True:
-                try: raw = await asyncio.wait_for(socket.recv(), timeout=4)
-                except TimeoutError: await socket.send("PING"); continue
-                try: payload = json.loads(raw)
-                except (TypeError, json.JSONDecodeError): continue
-                self.storage.raw("polymarket_chainlink_rtds", self.slug, payload)
-                if payload.get("topic") not in {"crypto_prices_chainlink", "crypto_prices"}:
-                    continue
-                price = payload.get("payload", {})
-                points = price.get("data") if isinstance(price.get("data"), list) else [price]
-                for point in points:
-                    if price.get("symbol") != api.CHAINLINK_SYMBOL:
-                        continue
-                    try: value, timestamp = float(point["value"]), int(point["timestamp"])
-                    except (KeyError, TypeError, ValueError): continue
-                    if value > 0:
-                        self.storage.buffered_write("INSERT INTO external_prices(collected_at,source,symbol,price,confidence,source_timestamp,raw_json) VALUES(?,?,?,?,?,?,?)", (now(), "chainlink_rtds", "BTC/USD", value, None, str(timestamp), json.dumps(payload, ensure_ascii=False)))
-                        self.storage.metric("chainlink_rtds", "stream", "ok", max(0.0, time.time() * 1000 - timestamp))
+        symbol = str(api.CHAINLINK_SYMBOL or "btc/usd").lower()
+        topic = ("crypto_prices_twap_sixty" if settings.CHAINLINK_TWAP_WINDOW_SECONDS == 60
+                 else "crypto_prices_twap_thirty")
+        subscription = {"action": "subscribe", "subscriptions": [{
+            "topic": topic, "type": "update",
+            "filters": json.dumps({"symbol": symbol}, separators=(",", ":")),
+        }]}
+        while True:
+            try:
+                async with websockets.connect(api.POLYMARKET_RTDS_WS, ping_interval=None) as socket:
+                    await socket.send(json.dumps(subscription))
+                    while True:
+                        try:
+                            raw = await asyncio.wait_for(socket.recv(), timeout=5)
+                        except TimeoutError:
+                            await socket.send("PING")
+                            continue
+                        try:
+                            message = json.loads(raw)
+                        except (TypeError, json.JSONDecodeError):
+                            continue
+                        if message.get("topic") != topic:
+                            continue
+                        point = message.get("payload", {})
+                        try:
+                            value = float(point["value"])
+                            timestamp = int(point["timestamp"])
+                        except (KeyError, TypeError, ValueError):
+                            continue
+                        if str(point.get("symbol", "")).lower() != symbol or value <= 0:
+                            continue
+                        self.storage.buffered_write(
+                            "INSERT INTO external_prices(collected_at,source,symbol,price,confidence,source_timestamp,raw_json) VALUES(?,?,?,?,?,?,?)",
+                            (now(), "chainlink_twap_60s", "BTC/USD", value, None, str(timestamp),
+                             json.dumps(message, ensure_ascii=False)),
+                        )
+                        self.storage.metric("chainlink_twap_60s", "stream", "ok", max(0.0, time.time() * 1000 - timestamp))
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:  # noqa: BLE001 - reconnect is required for a 24/7 oracle
+                self.storage.metric("chainlink_twap_60s", "stream", "error", None, type(error).__name__)
+                await asyncio.sleep(2)
 
-    async def run(self, seconds: int, use_ws: bool) -> None:
+    async def run(self, seconds: int, use_ws: bool, *, collect_external_feeds: bool = True) -> None:
         # Короткий timeout не позволяет медленному auxiliary endpoint задержать
         # весь 5-минутный цикл на 15 секунд. Следующий рынок собирается отдельно.
-        timeout = httpx.Timeout(8.0, connect=4.0)
+        # Медленный источник пропускает один тик, но не растягивает весь цикл
+        # стакан+reference до истечения freshness-gate торгового движка.
+        timeout = httpx.Timeout(3.0, connect=2.0)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             await self.discover(client)
             self.storage.flush()
@@ -479,10 +560,12 @@ class Collector:
             if use_ws and settings.COLLECTOR_USE_WEBSOCKETS:
                 if settings.ENABLE_POLYMARKET and settings.ENABLE_POLYMARKET_MARKET_WS:
                     tasks.append(asyncio.create_task(self.market_ws()))
-                if settings.ENABLE_CHAINLINK_RTDS: tasks.append(asyncio.create_task(self.chainlink_ws()))
+                if settings.ENABLE_CHAINLINK_RTDS and collect_external_feeds:
+                    tasks.append(asyncio.create_task(self.chainlink_ws()))
             try:
                 finish = time.monotonic() + seconds
                 future_preview_task: asyncio.Task | None = None
+                reference_task: asyncio.Task | None = None
                 while time.monotonic() < finish:
                     if future_preview_task is None or future_preview_task.done():
                         if future_preview_task is not None:
@@ -491,11 +574,23 @@ class Collector:
                             except Exception as error:  # auxiliary preview never blocks live data
                                 self.storage.raw("future_preview_error", self.slug, {"error": type(error).__name__})
                         future_preview_task = asyncio.create_task(self.collect_next_event_preview(client))
-                    operations = ("books", "prices", "reference")
-                    results = await asyncio.gather(
-                        self.collect_books(client), self.collect_prices(client), self.collect_reference(client),
-                        return_exceptions=True,
-                    )
+                    # Crypto-price endpoint нужен для официального Price to Beat и
+                    # финального closePrice, но до расчёта closePrice закономерно
+                    # равен null. Медленный ответ этого auxiliary endpoint не должен
+                    # задерживать критические стаканы и Bybit/OKX-котировки.
+                    if reference_task is None or reference_task.done():
+                        if reference_task is not None:
+                            try:
+                                reference_task.result()
+                            except Exception as error:
+                                self.storage.raw("reference_collection_error", self.slug, {"error": type(error).__name__})
+                        reference_task = asyncio.create_task(self.collect_reference(client))
+                    operations = ["books"]
+                    calls = [self.collect_books(client)]
+                    if collect_external_feeds:
+                        operations.append("prices")
+                        calls.append(self.collect_prices(client))
+                    results = await asyncio.gather(*calls, return_exceptions=True)
                     for operation, result in zip(operations, results, strict=True):
                         if isinstance(result, BaseException):
                             self.storage.raw(
@@ -508,6 +603,9 @@ class Collector:
                 if 'future_preview_task' in locals() and future_preview_task is not None:
                     future_preview_task.cancel()
                     await asyncio.gather(future_preview_task, return_exceptions=True)
+                if 'reference_task' in locals() and reference_task is not None:
+                    reference_task.cancel()
+                    await asyncio.gather(reference_task, return_exceptions=True)
                 for task in tasks: task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
 

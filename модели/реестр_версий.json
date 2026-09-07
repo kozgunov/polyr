@@ -3,7 +3,7 @@
     "version": "custom_entry_v0001",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-09T10:39:05.520732+00:00",
+    "created_at": "2026-08-09T13:39:05.520732+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -32,7 +32,7 @@
     "version": "catboost_entry_v0001",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-09T10:39:29.692482+00:00",
+    "created_at": "2026-08-09T13:39:29.692482+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -71,7 +71,7 @@
     "version": "exit_value_exit_v0001",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-09T10:39:34.592635+00:00",
+    "created_at": "2026-08-09T13:39:34.592635+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -97,7 +97,7 @@
     "version": "exit_value_exit_v0002",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-09T23:31:53.079420+00:00",
+    "created_at": "2026-08-10T02:31:53.07942+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -112,7 +112,7 @@
     ],
     "metadata": {
       "schema_version": 2,
-      "created_at": "2026-08-09T23:31:52.838665+00:00",
+      "created_at": "2026-08-10T02:31:52.838665+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "only_horizon_300_resolved_pairs",
       "rows": 1516,
@@ -192,39 +192,10 @@
     "deployment_state": "candidate_not_activated"
   },
   {
-    "version": "custom_entry_v0002",
-    "model": "custom",
-    "role": "entry",
-    "created_at": "2026-08-09T23:56:05.938992+00:00",
-    "artifacts": [
-      {
-        "file": "btc_5m_direction.joblib",
-        "sha256": "d5d6665076cd904fbbe2984056001c4634b49c678a6cb179caee8960b7e59968",
-        "size": 445585
-      }
-    ],
-    "metadata": {
-      "independent_events": 1065,
-      "train_events": 639,
-      "calibration_events": 213,
-      "test_events": 213,
-      "rows": 95810,
-      "accuracy": 0.774277880507556,
-      "brier": 0.1430915940650127,
-      "log_loss": 0.4256457440686523,
-      "raw_brier": 0.14354137302953845,
-      "raw_log_loss": 0.4250246461593578,
-      "balanced_accuracy": 0.774277776249052,
-      "roc_auc": 0.8763509545331568,
-      "production_ready": true
-    },
-    "deployment_state": "candidate_not_activated"
-  },
-  {
     "version": "catboost_entry_v0002",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-09T23:56:27.019444+00:00",
+    "created_at": "2026-08-10T02:56:27.019444+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -263,7 +234,7 @@
     "version": "exit_value_exit_v0003",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-09T23:57:46.337945+00:00",
+    "created_at": "2026-08-10T02:57:46.337945+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -289,7 +260,7 @@
     "version": "custom_entry_v0003",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-09T23:58:59.668154+00:00",
+    "created_at": "2026-08-10T02:58:59.668154+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -318,7 +289,7 @@
     "version": "catboost_entry_v0003",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-09T23:59:25.817443+00:00",
+    "created_at": "2026-08-10T02:59:25.817443+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -357,7 +328,7 @@
     "version": "exit_value_exit_v0004",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-10T00:00:04.379975+00:00",
+    "created_at": "2026-08-10T03:00:04.379975+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -380,39 +351,10 @@
     "deployment_state": "candidate_not_activated"
   },
   {
-    "version": "custom_entry_v0004",
-    "model": "custom",
-    "role": "entry",
-    "created_at": "2026-08-10T13:34:10.667780+00:00",
-    "artifacts": [
-      {
-        "file": "btc_5m_direction.joblib",
-        "sha256": "01679e46adaa8d540c4312c384fb2ec26dbfb8f1488d51b8c06932cdb7177322",
-        "size": 447631
-      }
-    ],
-    "metadata": {
-      "independent_events": 1139,
-      "train_events": 683,
-      "calibration_events": 228,
-      "test_events": 228,
-      "rows": 100393,
-      "accuracy": 0.7898545823469733,
-      "brier": 0.1390580087197871,
-      "log_loss": 0.41699381091888915,
-      "raw_brier": 0.1397911029488213,
-      "raw_log_loss": 0.4192136422327263,
-      "balanced_accuracy": 0.7898562964797701,
-      "roc_auc": 0.8837928985546388,
-      "production_ready": true
-    },
-    "deployment_state": "candidate_not_activated"
-  },
-  {
     "version": "custom_entry_v0005",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-10T13:34:28.091164+00:00",
+    "created_at": "2026-08-10T16:34:28.091164+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -441,7 +383,7 @@
     "version": "catboost_entry_v0004",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-10T13:34:29.573306+00:00",
+    "created_at": "2026-08-10T16:34:29.573306+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -480,7 +422,7 @@
     "version": "catboost_entry_v0005",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-10T13:34:48.144090+00:00",
+    "created_at": "2026-08-10T16:34:48.14409+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -519,7 +461,7 @@
     "version": "exit_value_exit_v0005",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-10T13:37:43.412744+00:00",
+    "created_at": "2026-08-10T16:37:43.412744+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -534,7 +476,7 @@
     ],
     "metadata": {
       "schema_version": 2,
-      "created_at": "2026-08-10T13:37:43.188110+00:00",
+      "created_at": "2026-08-10T16:37:43.18811+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "only_horizon_300_resolved_pairs",
       "rows": 1761,
@@ -617,7 +559,7 @@
     "version": "exit_value_exit_v0006",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-10T13:37:54.374025+00:00",
+    "created_at": "2026-08-10T16:37:54.374025+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -632,7 +574,7 @@
     ],
     "metadata": {
       "schema_version": 2,
-      "created_at": "2026-08-10T13:37:54.237332+00:00",
+      "created_at": "2026-08-10T16:37:54.237332+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "only_horizon_300_resolved_pairs",
       "rows": 1761,
@@ -715,7 +657,7 @@
     "version": "exit_value_exit_v0007",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-10T13:40:22.948256+00:00",
+    "created_at": "2026-08-10T16:40:22.948256+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -730,7 +672,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-08-10T13:40:22.723090+00:00",
+      "created_at": "2026-08-10T16:40:22.72309+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 1770,
@@ -827,7 +769,7 @@
     "version": "exit_value_exit_v0008",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-10T13:41:19.923356+00:00",
+    "created_at": "2026-08-10T16:41:19.923356+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -842,7 +784,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-08-10T13:41:19.728252+00:00",
+      "created_at": "2026-08-10T16:41:19.728252+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 1770,
@@ -941,7 +883,7 @@
     "version": "custom_entry_v0006",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-11T19:39:27.843427+00:00",
+    "created_at": "2026-08-11T22:39:27.843427+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -970,7 +912,7 @@
     "version": "catboost_entry_v0006",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-11T19:39:44.876971+00:00",
+    "created_at": "2026-08-11T22:39:44.876971+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -1009,7 +951,7 @@
     "version": "exit_value_exit_v0009",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-11T19:42:07.535076+00:00",
+    "created_at": "2026-08-11T22:42:07.535076+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -1024,7 +966,7 @@
     ],
     "metadata": {
       "schema_version": 2,
-      "created_at": "2026-08-11T19:42:07.339958+00:00",
+      "created_at": "2026-08-11T22:42:07.339958+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "only_horizon_300_resolved_pairs",
       "rows": 2187,
@@ -1107,7 +1049,7 @@
     "version": "custom_entry_v0007",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-12T13:16:15.491566+00:00",
+    "created_at": "2026-08-12T16:16:15.491566+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -1136,7 +1078,7 @@
     "version": "catboost_entry_v0007",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-12T13:16:41.403535+00:00",
+    "created_at": "2026-08-12T16:16:41.403535+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -1175,7 +1117,7 @@
     "version": "exit_value_exit_v0010",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-12T13:21:48.866713+00:00",
+    "created_at": "2026-08-12T16:21:48.866713+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -1190,7 +1132,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-08-12T13:21:48.604245+00:00",
+      "created_at": "2026-08-12T16:21:48.604245+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 2682,
@@ -1289,7 +1231,7 @@
     "version": "custom_entry_v0008",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-13T12:51:11.962603+00:00",
+    "created_at": "2026-08-13T15:51:11.962603+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -1318,7 +1260,7 @@
     "version": "catboost_entry_v0008",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-13T12:51:35.445723+00:00",
+    "created_at": "2026-08-13T15:51:35.445723+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -1357,7 +1299,7 @@
     "version": "exit_value_exit_v0011",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-13T12:57:30.870672+00:00",
+    "created_at": "2026-08-13T15:57:30.870672+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -1372,7 +1314,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-08-13T12:57:30.633036+00:00",
+      "created_at": "2026-08-13T15:57:30.633036+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 3721,
@@ -1471,7 +1413,7 @@
     "version": "exit_value_exit_v0012",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-13T17:45:21.217101+00:00",
+    "created_at": "2026-08-13T20:45:21.217101+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -1486,7 +1428,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-08-13T17:45:20.311500+00:00",
+      "created_at": "2026-08-13T20:45:20.3115+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 4153,
@@ -1585,7 +1527,7 @@
     "version": "exit_sequence_exit_v0001",
     "model": "exit_sequence",
     "role": "exit",
-    "created_at": "2026-08-13T17:49:51.520666+00:00",
+    "created_at": "2026-08-13T20:49:51.520666+03:00",
     "artifacts": [
       {
         "file": "exit_sequence_v14.joblib",
@@ -1600,7 +1542,7 @@
     ],
     "metadata": {
       "schema_version": 1,
-      "created_at": "2026-08-13T17:49:50.627357+00:00",
+      "created_at": "2026-08-13T20:49:50.627357+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "features": [
         "seconds_in_position",
@@ -1625,7 +1567,7 @@
       "events": 306,
       "selected_policy": {
         "probability_threshold": 1.01,
-        "advantage_threshold": Infinity,
+        "advantage_threshold": "Infinity",
         "closes": 7,
         "precision": 1.0,
         "advantage_sum_usdc": 9.339218623238622
@@ -1677,7 +1619,7 @@
     "version": "exit_sequence_exit_v0002",
     "model": "exit_sequence",
     "role": "exit",
-    "created_at": "2026-08-13T17:53:09.638639+00:00",
+    "created_at": "2026-08-13T20:53:09.638639+03:00",
     "artifacts": [
       {
         "file": "exit_sequence_v14.joblib",
@@ -1692,7 +1634,7 @@
     ],
     "metadata": {
       "schema_version": 1,
-      "created_at": "2026-08-13T17:53:08.897932+00:00",
+      "created_at": "2026-08-13T20:53:08.897932+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "features": [
         "seconds_in_position",
@@ -1717,7 +1659,7 @@
       "events": 306,
       "selected_policy": {
         "probability_threshold": 1.01,
-        "advantage_threshold": Infinity,
+        "advantage_threshold": "Infinity",
         "closes": 7,
         "precision": 1.0,
         "advantage_sum_usdc": 9.339218623238622
@@ -1776,7 +1718,7 @@
     "version": "custom_entry_v0009",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-13T21:11:45.150447+00:00",
+    "created_at": "2026-08-14T00:11:45.150447+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -1805,7 +1747,7 @@
     "version": "catboost_entry_v0009",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-13T21:11:59.587070+00:00",
+    "created_at": "2026-08-14T00:11:59.58707+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -1844,7 +1786,7 @@
     "version": "exit_value_exit_v0013",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-13T21:16:42.713052+00:00",
+    "created_at": "2026-08-14T00:16:42.713052+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -1859,7 +1801,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-08-13T21:16:42.452468+00:00",
+      "created_at": "2026-08-14T00:16:42.452468+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 4598,
@@ -1893,7 +1835,7 @@
         "advantage_mean_usdc": -1.9258839857420136
       },
       "probability_threshold": 1.01,
-      "advantage_threshold": Infinity,
+      "advantage_threshold": "Infinity",
       "train": {
         "rows": 2457,
         "events": 259,
@@ -1958,7 +1900,7 @@
     "version": "custom_entry_v0010",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-14T07:23:01.815722+00:00",
+    "created_at": "2026-08-14T10:23:01.815722+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -1987,7 +1929,7 @@
     "version": "catboost_entry_v0010",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-14T07:23:17.768340+00:00",
+    "created_at": "2026-08-14T10:23:17.76834+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -2026,7 +1968,7 @@
     "version": "exit_value_exit_v0014",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-14T07:28:51.922905+00:00",
+    "created_at": "2026-08-14T10:28:51.922905+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -2041,7 +1983,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-08-14T07:28:51.637571+00:00",
+      "created_at": "2026-08-14T10:28:51.637571+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 5829,
@@ -2075,7 +2017,7 @@
         "advantage_mean_usdc": -0.4587902319642572
       },
       "probability_threshold": 1.01,
-      "advantage_threshold": Infinity,
+      "advantage_threshold": "Infinity",
       "train": {
         "rows": 3622,
         "events": 319,
@@ -2140,7 +2082,7 @@
     "version": "custom_entry_v0011",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-14T12:03:36.910504+00:00",
+    "created_at": "2026-08-14T15:03:36.910504+03:00",
     "artifacts": [
       {
         "file": "direction_model.joblib",
@@ -2169,7 +2111,7 @@
     "version": "custom_entry_v0012",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-14T12:03:59.751307+00:00",
+    "created_at": "2026-08-14T15:03:59.751307+03:00",
     "artifacts": [
       {
         "file": "direction_model.joblib",
@@ -2198,7 +2140,7 @@
     "version": "custom_entry_v0013",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-14T12:04:15.510758+00:00",
+    "created_at": "2026-08-14T15:04:15.510758+03:00",
     "artifacts": [
       {
         "file": "direction_model.joblib",
@@ -2227,7 +2169,7 @@
     "version": "custom_entry_v0014",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-14T15:41:27.764364+00:00",
+    "created_at": "2026-08-14T18:41:27.764364+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -2256,7 +2198,7 @@
     "version": "catboost_entry_v0011",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-14T15:41:47.858106+00:00",
+    "created_at": "2026-08-14T18:41:47.858106+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -2295,7 +2237,7 @@
     "version": "exit_value_exit_v0015",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-14T15:48:52.922018+00:00",
+    "created_at": "2026-08-14T18:48:52.922018+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -2310,7 +2252,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-08-14T15:48:52.592059+00:00",
+      "created_at": "2026-08-14T18:48:52.592059+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 6518,
@@ -2409,7 +2351,7 @@
     "version": "custom_entry_v0015",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-15T00:07:42.978093+00:00",
+    "created_at": "2026-08-15T03:07:42.978093+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -2438,7 +2380,7 @@
     "version": "catboost_entry_v0012",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-15T00:08:10.593810+00:00",
+    "created_at": "2026-08-15T03:08:10.59381+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -2477,7 +2419,7 @@
     "version": "custom_entry_v0016",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-15T00:31:05.009174+00:00",
+    "created_at": "2026-08-15T03:31:05.009174+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -2506,7 +2448,7 @@
     "version": "catboost_entry_v0013",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-15T00:31:27.747182+00:00",
+    "created_at": "2026-08-15T03:31:27.747182+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -2545,7 +2487,7 @@
     "version": "exit_value_exit_v0016",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-15T00:38:12.726888+00:00",
+    "created_at": "2026-08-15T03:38:12.726888+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -2560,7 +2502,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-08-15T00:38:12.460998+00:00",
+      "created_at": "2026-08-15T03:38:12.460998+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 6518,
@@ -2659,7 +2601,7 @@
     "version": "custom_entry_v0017",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-15T14:18:19.826681+00:00",
+    "created_at": "2026-08-15T17:18:19.826681+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -2688,7 +2630,7 @@
     "version": "custom_entry_v0018",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-15T14:18:32.236897+00:00",
+    "created_at": "2026-08-15T17:18:32.236897+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -2717,7 +2659,7 @@
     "version": "catboost_entry_v0014",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-15T14:18:47.954271+00:00",
+    "created_at": "2026-08-15T17:18:47.954271+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -2756,7 +2698,7 @@
     "version": "catboost_entry_v0015",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-15T14:19:00.141237+00:00",
+    "created_at": "2026-08-15T17:19:00.141237+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -2795,7 +2737,7 @@
     "version": "exit_value_exit_v0017",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-15T14:30:05.412528+00:00",
+    "created_at": "2026-08-15T17:30:05.412528+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -2810,7 +2752,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-08-15T14:30:05.134601+00:00",
+      "created_at": "2026-08-15T17:30:05.134601+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 6518,
@@ -2909,7 +2851,7 @@
     "version": "exit_value_exit_v0018",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-15T14:30:07.076495+00:00",
+    "created_at": "2026-08-15T17:30:07.076495+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -2924,7 +2866,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-08-15T14:30:06.759415+00:00",
+      "created_at": "2026-08-15T17:30:06.759415+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 6518,
@@ -3023,7 +2965,7 @@
     "version": "custom_entry_v0019",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-16T23:56:26.920021+00:00",
+    "created_at": "2026-08-17T02:56:26.920021+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -3052,7 +2994,7 @@
     "version": "catboost_entry_v0016",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-16T23:56:53.337024+00:00",
+    "created_at": "2026-08-17T02:56:53.337024+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -3091,7 +3033,7 @@
     "version": "exit_value_exit_v0019",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-17T00:02:43.656534+00:00",
+    "created_at": "2026-08-17T03:02:43.656534+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -3106,7 +3048,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-08-17T00:02:43.348976+00:00",
+      "created_at": "2026-08-17T03:02:43.348976+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 6855,
@@ -3205,7 +3147,7 @@
     "version": "custom_entry_v0020",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-08-17T11:42:39.194579+00:00",
+    "created_at": "2026-08-17T14:42:39.194579+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -3234,7 +3176,7 @@
     "version": "catboost_entry_v0017",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-08-17T11:43:47.732756+00:00",
+    "created_at": "2026-08-17T14:43:47.732756+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -3273,7 +3215,7 @@
     "version": "exit_value_exit_v0020",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-08-17T11:53:07.201677+00:00",
+    "created_at": "2026-08-17T14:53:07.201677+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -3288,7 +3230,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-08-17T11:53:06.851294+00:00",
+      "created_at": "2026-08-17T14:53:06.851294+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 8148,
@@ -3387,7 +3329,7 @@
     "version": "custom_entry_v0021",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-09-01T17:48:15.516584+00:00",
+    "created_at": "2026-09-01T20:48:15.516584+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -3417,7 +3359,7 @@
     "version": "catboost_entry_v0018",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-09-01T17:48:54.928967+00:00",
+    "created_at": "2026-09-01T20:48:54.928967+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -3457,7 +3399,7 @@
     "version": "exit_value_exit_v0021",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-09-01T17:56:46.907867+00:00",
+    "created_at": "2026-09-01T20:56:46.907867+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -3472,7 +3414,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-09-01T17:56:46.644069+00:00",
+      "created_at": "2026-09-01T20:56:46.644069+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 8553,
@@ -3571,7 +3513,7 @@
     "version": "custom_entry_v0022",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-09-01T18:47:52.777215+00:00",
+    "created_at": "2026-09-01T21:47:52.777215+03:00",
     "artifacts": [
       {
         "file": "custom_entry.joblib",
@@ -3601,7 +3543,7 @@
     "version": "catboost_entry_v0019",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-09-01T18:48:25.726976+00:00",
+    "created_at": "2026-09-01T21:48:25.726976+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -3641,7 +3583,7 @@
     "version": "custom_entry_v0023",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-09-02T02:25:52.713053+00:00",
+    "created_at": "2026-09-02T05:25:52.713053+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -3671,7 +3613,7 @@
     "version": "catboost_entry_v0020",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-09-02T02:26:27.018825+00:00",
+    "created_at": "2026-09-02T05:26:27.018825+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -3711,7 +3653,7 @@
     "version": "exit_value_exit_v0022",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-09-02T02:45:08.438538+00:00",
+    "created_at": "2026-09-02T05:45:08.438538+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -3726,7 +3668,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-09-02T02:45:08.138370+00:00",
+      "created_at": "2026-09-02T05:45:08.13837+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 9291,
@@ -3825,7 +3767,7 @@
     "version": "exit_sequence_exit_v0003",
     "model": "exit_sequence",
     "role": "exit",
-    "created_at": "2026-09-02T09:32:12.353470+00:00",
+    "created_at": "2026-09-02T12:32:12.35347+03:00",
     "artifacts": [
       {
         "file": "exit_sequence_v14.joblib",
@@ -3840,7 +3782,7 @@
     ],
     "metadata": {
       "schema_version": 2,
-      "created_at": "2026-09-02T09:32:11.641965+00:00",
+      "created_at": "2026-09-02T12:32:11.641965+03:00",
       "target": "close_advantage_vs_best_wait_usdc",
       "decision_semantics": "CLOSE_NOW only when it beats the best of WAIT_15/30/60 and HOLD after fees",
       "features": [
@@ -3866,7 +3808,7 @@
       "events": 501,
       "selected_policy": {
         "probability_threshold": 1.01,
-        "advantage_threshold": Infinity,
+        "advantage_threshold": "Infinity",
         "closes": 5,
         "precision": 0.6,
         "advantage_sum_usdc": -0.6283605930364136
@@ -3928,7 +3870,7 @@
     "version": "exit_sequence_exit_v0004",
     "model": "exit_sequence",
     "role": "exit",
-    "created_at": "2026-09-02T15:00:54.558227+00:00",
+    "created_at": "2026-09-02T18:00:54.558227+03:00",
     "artifacts": [
       {
         "file": "exit_sequence_v14.joblib",
@@ -3943,7 +3885,7 @@
     ],
     "metadata": {
       "schema_version": 2,
-      "created_at": "2026-09-02T15:00:54.271256+00:00",
+      "created_at": "2026-09-02T18:00:54.271256+03:00",
       "target": "close_advantage_vs_best_wait_usdc",
       "decision_semantics": "CLOSE_NOW only when it beats the best of WAIT_15/30/60 and HOLD after fees",
       "features": [
@@ -3969,7 +3911,7 @@
       "events": 516,
       "selected_policy": {
         "probability_threshold": 1.01,
-        "advantage_threshold": Infinity,
+        "advantage_threshold": "Infinity",
         "closes": 6,
         "precision": 0.6666666666666666,
         "advantage_sum_usdc": 2.1095675536817335
@@ -4028,40 +3970,10 @@
     "deployment_state": "candidate_not_activated"
   },
   {
-    "version": "custom_entry_v0024",
-    "model": "custom",
-    "role": "entry",
-    "created_at": "2026-09-02T15:27:17.794370+00:00",
-    "artifacts": [
-      {
-        "file": "btc_5m_direction.joblib",
-        "sha256": "98b8afa4124a79d0a10614c23ff8ab44b74e1f9a811d4f59941a636d0728e119",
-        "size": 544703
-      }
-    ],
-    "metadata": {
-      "independent_events": 2443,
-      "train_events": 1465,
-      "calibration_events": 489,
-      "test_events": 489,
-      "rows": 211481,
-      "accuracy": 0.7736808483454708,
-      "brier": 0.14012487909557111,
-      "log_loss": 0.4105039869765153,
-      "raw_brier": 0.14104532339359352,
-      "raw_log_loss": 0.41290607373513033,
-      "balanced_accuracy": 0.7736791011447242,
-      "roc_auc": 0.8805648455027201,
-      "pr_auc": 0.8889321339151217,
-      "production_ready": true
-    },
-    "deployment_state": "candidate_not_activated"
-  },
-  {
     "version": "catboost_entry_v0021",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-09-02T15:27:54.552391+00:00",
+    "created_at": "2026-09-02T18:27:54.552391+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -4101,7 +4013,7 @@
     "version": "exit_value_exit_v0023",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-09-02T15:52:48.265644+00:00",
+    "created_at": "2026-09-02T18:52:48.265644+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -4116,7 +4028,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-09-02T15:52:47.973248+00:00",
+      "created_at": "2026-09-02T18:52:47.973248+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 9379,
@@ -4215,7 +4127,7 @@
     "version": "custom_entry_v0025",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-09-02T22:57:15.924789+00:00",
+    "created_at": "2026-09-03T01:57:15.924789+03:00",
     "artifacts": [
       {
         "file": "custom_entry.joblib",
@@ -4245,7 +4157,7 @@
     "version": "catboost_entry_v0022",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-09-02T22:57:50.834209+00:00",
+    "created_at": "2026-09-03T01:57:50.834209+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -4285,7 +4197,7 @@
     "version": "exit_sequence_v19_exit_v0001",
     "model": "exit_sequence_v19",
     "role": "exit",
-    "created_at": "2026-09-02T23:19:03.943870+00:00",
+    "created_at": "2026-09-03T02:19:03.94387+03:00",
     "artifacts": [
       {
         "file": "exit_sequence_v19.joblib",
@@ -4300,7 +4212,7 @@
     ],
     "metadata": {
       "schema_version": 4,
-      "created_at": "2026-09-02T23:19:02.802338+00:00",
+      "created_at": "2026-09-03T02:19:02.802338+03:00",
       "target": "close_advantage_usdc",
       "decision_semantics": "first causal CLOSE_NOW trigger versus HOLD, evaluated once per position after fees",
       "features": [
@@ -4424,7 +4336,7 @@
     "version": "exit_hold_probability_v19_exit_v0001",
     "model": "exit_hold_probability_v19",
     "role": "exit",
-    "created_at": "2026-09-02T23:20:50.264034+00:00",
+    "created_at": "2026-09-03T02:20:50.264034+03:00",
     "artifacts": [
       {
         "file": "exit_hold_probability_v19.joblib",
@@ -4439,7 +4351,7 @@
     ],
     "metadata": {
       "schema_version": 1,
-      "created_at": "2026-09-02T23:20:49.432122+00:00",
+      "created_at": "2026-09-03T02:20:49.432122+03:00",
       "model": "exit_hold_probability_v19",
       "target": "P(held contract resolves to 1)",
       "features": [
@@ -4473,7 +4385,7 @@
       "rows": 3464,
       "events": 518,
       "selected_validation_policy": {
-        "margin_usdc": Infinity,
+        "margin_usdc": "Infinity",
         "positions": 78,
         "closes": 68,
         "close_precision": 0.35294117647058826,
@@ -4563,7 +4475,7 @@
     "version": "exit_hold_probability_v19_exit_v0002",
     "model": "exit_hold_probability_v19",
     "role": "exit",
-    "created_at": "2026-09-02T23:21:32.418970+00:00",
+    "created_at": "2026-09-03T02:21:32.41897+03:00",
     "artifacts": [
       {
         "file": "exit_hold_probability_v19.joblib",
@@ -4578,7 +4490,7 @@
     ],
     "metadata": {
       "schema_version": 1,
-      "created_at": "2026-09-02T23:21:31.434344+00:00",
+      "created_at": "2026-09-03T02:21:31.434344+03:00",
       "model": "exit_hold_probability_v19",
       "target": "P(held contract resolves to 1)",
       "features": [
@@ -4702,7 +4614,7 @@
     "version": "exit_sequence_v19_exit_v0002",
     "model": "exit_sequence_v19",
     "role": "exit",
-    "created_at": "2026-09-02T23:22:47.038768+00:00",
+    "created_at": "2026-09-03T02:22:47.038768+03:00",
     "artifacts": [
       {
         "file": "exit_sequence_v19.joblib",
@@ -4717,7 +4629,7 @@
     ],
     "metadata": {
       "schema_version": 4,
-      "created_at": "2026-09-02T23:22:45.805681+00:00",
+      "created_at": "2026-09-03T02:22:45.805681+03:00",
       "target": "close_advantage_usdc",
       "decision_semantics": "first causal CLOSE_NOW trigger versus HOLD, evaluated once per position after fees",
       "features": [
@@ -4841,7 +4753,7 @@
     "version": "exit_hold_probability_v19_exit_v0003",
     "model": "exit_hold_probability_v19",
     "role": "exit",
-    "created_at": "2026-09-02T23:23:03.490647+00:00",
+    "created_at": "2026-09-03T02:23:03.490647+03:00",
     "artifacts": [
       {
         "file": "exit_hold_probability_v19.joblib",
@@ -4856,7 +4768,7 @@
     ],
     "metadata": {
       "schema_version": 1,
-      "created_at": "2026-09-02T23:23:02.714919+00:00",
+      "created_at": "2026-09-03T02:23:02.714919+03:00",
       "model": "exit_hold_probability_v19",
       "target": "P(held contract resolves to 1)",
       "features": [
@@ -4890,7 +4802,7 @@
       "rows": 3708,
       "events": 553,
       "selected_validation_policy": {
-        "margin_usdc": Infinity,
+        "margin_usdc": "Infinity",
         "positions": 83,
         "closes": 25,
         "close_precision": 0.32,
@@ -4980,7 +4892,7 @@
     "version": "custom_entry_v0026",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-09-02T23:51:52.192687+00:00",
+    "created_at": "2026-09-03T02:51:52.192687+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -5010,7 +4922,7 @@
     "version": "catboost_entry_v0023",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-09-02T23:52:30.601829+00:00",
+    "created_at": "2026-09-03T02:52:30.601829+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -5050,7 +4962,7 @@
     "version": "exit_value_exit_v0024",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-09-03T00:13:53.136332+00:00",
+    "created_at": "2026-09-03T03:13:53.136332+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -5065,7 +4977,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-09-03T00:13:52.585904+00:00",
+      "created_at": "2026-09-03T03:13:52.585904+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 9858,
@@ -5164,7 +5076,7 @@
     "version": "custom_entry_v0027",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-09-03T11:48:47.264729+00:00",
+    "created_at": "2026-09-03T14:48:47.264729+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -5194,7 +5106,7 @@
     "version": "catboost_entry_v0024",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-09-03T11:49:23.765496+00:00",
+    "created_at": "2026-09-03T14:49:23.765496+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -5234,7 +5146,7 @@
     "version": "exit_value_exit_v0025",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-09-03T12:05:50.502148+00:00",
+    "created_at": "2026-09-03T15:05:50.502148+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -5249,7 +5161,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-09-03T12:05:50.218223+00:00",
+      "created_at": "2026-09-03T15:05:50.218223+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 9935,
@@ -5348,7 +5260,7 @@
     "version": "exit_hold_probability_v19_exit_v0004",
     "model": "exit_hold_probability_v19",
     "role": "exit",
-    "created_at": "2026-09-03T13:19:41.878572+00:00",
+    "created_at": "2026-09-03T16:19:41.878572+03:00",
     "artifacts": [
       {
         "file": "exit_hold_probability_v19.joblib",
@@ -5363,7 +5275,7 @@
     ],
     "metadata": {
       "schema_version": 1,
-      "created_at": "2026-09-03T13:19:41.523474+00:00",
+      "created_at": "2026-09-03T16:19:41.523474+03:00",
       "model": "exit_hold_probability_v19",
       "target": "P(held contract resolves to 1)",
       "features": [
@@ -5397,7 +5309,7 @@
       "rows": 3708,
       "events": 553,
       "selected_validation_policy": {
-        "margin_usdc": Infinity,
+        "margin_usdc": "Infinity",
         "positions": 83,
         "closes": 25,
         "close_precision": 0.32,
@@ -5487,7 +5399,7 @@
     "version": "exit_sequence_v19_exit_v0003",
     "model": "exit_sequence_v19",
     "role": "exit",
-    "created_at": "2026-09-03T13:20:04.193073+00:00",
+    "created_at": "2026-09-03T16:20:04.193073+03:00",
     "artifacts": [
       {
         "file": "exit_sequence_v19.joblib",
@@ -5502,7 +5414,7 @@
     ],
     "metadata": {
       "schema_version": 4,
-      "created_at": "2026-09-03T13:20:03.771319+00:00",
+      "created_at": "2026-09-03T16:20:03.771319+03:00",
       "target": "close_advantage_usdc",
       "decision_semantics": "first causal CLOSE_NOW trigger versus HOLD, evaluated once per position after fees",
       "features": [
@@ -5626,7 +5538,7 @@
     "version": "custom_entry_v0028",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-09-04T04:07:18.294264+00:00",
+    "created_at": "2026-09-04T07:07:18.294264+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -5656,7 +5568,7 @@
     "version": "catboost_entry_v0025",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-09-04T04:08:09.892497+00:00",
+    "created_at": "2026-09-04T07:08:09.892497+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -5696,7 +5608,7 @@
     "version": "exit_value_exit_v0026",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-09-04T04:31:33.185999+00:00",
+    "created_at": "2026-09-04T07:31:33.185999+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -5711,7 +5623,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-09-04T04:31:32.789361+00:00",
+      "created_at": "2026-09-04T07:31:32.789361+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 10329,
@@ -5810,7 +5722,7 @@
     "version": "custom_entry_v0029",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-09-04T13:46:06.811932+00:00",
+    "created_at": "2026-09-04T16:46:06.811932+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -5840,7 +5752,7 @@
     "version": "catboost_entry_v0026",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-09-04T13:49:22.252083+00:00",
+    "created_at": "2026-09-04T16:49:22.252083+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -5880,7 +5792,7 @@
     "version": "custom_entry_v0030",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-09-04T14:23:09.038945+00:00",
+    "created_at": "2026-09-04T17:23:09.038945+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -5910,7 +5822,7 @@
     "version": "catboost_entry_v0027",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-09-04T14:23:56.094993+00:00",
+    "created_at": "2026-09-04T17:23:56.094993+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -5950,7 +5862,7 @@
     "version": "custom_entry_v0031",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-09-04T14:38:27.729710+00:00",
+    "created_at": "2026-09-04T17:38:27.72971+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -5980,7 +5892,7 @@
     "version": "catboost_entry_v0028",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-09-04T14:39:29.319763+00:00",
+    "created_at": "2026-09-04T17:39:29.319763+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -6020,7 +5932,7 @@
     "version": "custom_entry_v0032",
     "model": "custom",
     "role": "entry",
-    "created_at": "2026-09-04T15:14:03.207268+00:00",
+    "created_at": "2026-09-04T18:14:03.207268+03:00",
     "artifacts": [
       {
         "file": "btc_5m_direction.joblib",
@@ -6050,7 +5962,7 @@
     "version": "catboost_entry_v0029",
     "model": "catboost",
     "role": "entry",
-    "created_at": "2026-09-04T15:14:56.051679+00:00",
+    "created_at": "2026-09-04T18:14:56.051679+03:00",
     "artifacts": [
       {
         "file": "catboost_btc_5m.cbm",
@@ -6090,7 +6002,7 @@
     "version": "exit_value_exit_v0027",
     "model": "exit_value",
     "role": "exit",
-    "created_at": "2026-09-04T15:55:11.270688+00:00",
+    "created_at": "2026-09-04T18:55:11.270688+03:00",
     "artifacts": [
       {
         "file": "btc_5m_exit_value.joblib",
@@ -6105,7 +6017,7 @@
     ],
     "metadata": {
       "schema_version": 3,
-      "created_at": "2026-09-04T15:55:09.862823+00:00",
+      "created_at": "2026-09-04T18:55:09.862823+03:00",
       "target": "close_now_net_pnl_minus_hold_to_resolution_net_pnl",
       "label_policy": "two_stage: P(CLOSE beats HOLD) and E(close advantage); horizon_300 resolved pairs",
       "rows": 10662,
@@ -6204,7 +6116,7 @@
     "version": "exit_sequence_v20_exit_v0001",
     "model": "exit_sequence_v20",
     "role": "exit",
-    "created_at": "2026-09-05T12:47:16.352990+00:00",
+    "created_at": "2026-09-05T15:47:16.35299+03:00",
     "artifacts": [
       {
         "file": "exit_sequence_v20.joblib",
@@ -6219,7 +6131,7 @@
     ],
     "metadata": {
       "schema_version": 5,
-      "created_at": "2026-09-05T12:47:15.857833+00:00",
+      "created_at": "2026-09-05T15:47:15.857833+03:00",
       "target": "close_advantage_vs_best_wait_usdc",
       "decision_semantics": "first causal CLOSE_NOW trigger versus best of later exit and HOLD, evaluated after fees",
       "features": [
@@ -6254,7 +6166,7 @@
       "events": 553,
       "selected_policy": {
         "probability_threshold": 1.01,
-        "advantage_threshold": Infinity,
+        "advantage_threshold": "Infinity",
         "positions": 111,
         "closes": 7,
         "close_precision": 1.0,
@@ -6331,6 +6243,145 @@
         "brier": 0.07540977789732418,
         "up_rows": 286,
         "down_rows": 465
+      },
+      "promotion_gate": {
+        "passed": false,
+        "candidate_only": true
+      }
+    },
+    "deployment_state": "candidate_not_activated"
+  },
+  {
+    "version": "exit_sequence_v21_exit_v0001",
+    "model": "exit_sequence_v21",
+    "role": "exit",
+    "created_at": "2026-09-06T04:19:37.956091+03:00",
+    "artifacts": [
+      {
+        "file": "exit_sequence_v21.joblib",
+        "sha256": "ed8099ff918259eee1579b160294a3f5b3b4c1bda7402a096b174e52f7e07da4",
+        "size": 1346386
+      },
+      {
+        "file": "exit_sequence_report.json",
+        "sha256": "e1bc93d6f242600e32b214ecfff406e67ae93a5ade1cf6d751b46a078bb8d82a",
+        "size": 3340
+      }
+    ],
+    "metadata": {
+      "schema_version": 6,
+      "created_at": "2026-09-06T04:19:37.568324+03:00",
+      "target": "close_advantage_vs_best_wait_usdc",
+      "decision_semantics": "first causal CLOSE_NOW trigger versus best of later exit and HOLD, evaluated after fees",
+      "features": [
+        "seconds_in_position",
+        "remaining_seconds",
+        "current_bid",
+        "average_price",
+        "marked_return",
+        "oriented_distance_to_target_pct",
+        "momentum_bid_3ticks",
+        "momentum_distance_3ticks",
+        "momentum_bid_15s",
+        "momentum_bid_30s",
+        "momentum_bid_60s",
+        "bid_slope_15s",
+        "bid_slope_30s",
+        "target_distance_available",
+        "peak_bid_since_entry",
+        "trough_bid_since_entry",
+        "drawdown_from_peak",
+        "recovery_from_trough",
+        "seconds_since_peak",
+        "maximum_favorable_excursion",
+        "maximum_adverse_excursion",
+        "spread",
+        "log_bid_size",
+        "log_ask_size",
+        "shares",
+        "original_cost_usdc"
+      ],
+      "rows": 5914,
+      "events": 722,
+      "selected_policy": {
+        "probability_threshold": 1.01,
+        "advantage_threshold": "Infinity",
+        "positions": 144,
+        "closes": 2,
+        "close_precision": 1.0,
+        "policy_pnl_usdc": -72.46756765481304,
+        "hold_pnl_usdc": -73.16943765481304,
+        "advantage_vs_hold_usdc": 0.70187,
+        "selected_advantage_mean_usdc": 0.350935,
+        "up_closes": 0,
+        "down_closes": 2
+      },
+      "shadow_policy": {
+        "probability_threshold": 0.7500000000000002,
+        "advantage_threshold": -0.25,
+        "positions": 144,
+        "closes": 3,
+        "close_precision": 1.0,
+        "policy_pnl_usdc": -71.23882765481304,
+        "hold_pnl_usdc": -73.16943765481304,
+        "advantage_vs_hold_usdc": 1.9306100000000002,
+        "selected_advantage_mean_usdc": 0.6435366666666668,
+        "up_closes": 0,
+        "down_closes": 3
+      },
+      "train": {
+        "positions": 446,
+        "closes": 0,
+        "close_precision": 0.0,
+        "policy_pnl_usdc": 43.161776815294665,
+        "hold_pnl_usdc": 43.161776815294665,
+        "advantage_vs_hold_usdc": 0.0,
+        "selected_advantage_mean_usdc": 0.0,
+        "up_closes": 0,
+        "down_closes": 0,
+        "rows": 2893,
+        "events": 433,
+        "roc_auc": 0.9494740953603213,
+        "pr_auc": 0.8098211946957674,
+        "brier": 0.06200608106971798,
+        "up_rows": 1477,
+        "down_rows": 1416
+      },
+      "validation": {
+        "positions": 144,
+        "closes": 0,
+        "close_precision": 0.0,
+        "policy_pnl_usdc": -73.16943765481304,
+        "hold_pnl_usdc": -73.16943765481304,
+        "advantage_vs_hold_usdc": 0.0,
+        "selected_advantage_mean_usdc": 0.0,
+        "up_closes": 0,
+        "down_closes": 0,
+        "rows": 1135,
+        "events": 144,
+        "roc_auc": 0.8496867388274524,
+        "pr_auc": 0.427852594486821,
+        "brier": 0.09919507814822807,
+        "up_rows": 386,
+        "down_rows": 749
+      },
+      "test": {
+        "positions": 145,
+        "closes": 0,
+        "close_precision": 0.0,
+        "policy_pnl_usdc": 17.199249999999992,
+        "hold_pnl_usdc": 17.199249999999992,
+        "advantage_vs_hold_usdc": 0.0,
+        "selected_advantage_mean_usdc": 0.0,
+        "up_closes": 0,
+        "down_closes": 0,
+        "rows": 1886,
+        "events": 145,
+        "roc_auc": 0.8579240909749385,
+        "pr_auc": 0.4772522748203429,
+        "brier": 0.08476659575818223,
+        "up_rows": 330,
+        "down_rows": 1556
       },
       "promotion_gate": {
         "passed": false,

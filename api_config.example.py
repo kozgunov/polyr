@@ -31,7 +31,7 @@ KILL_SWITCH = True
 
 # Chainlink (источник отключён в текущей конфигурации)
 CHAINLINK_SOURCE = ""
-CHAINLINK_SYMBOL = "BTC/USD"
+CHAINLINK_SYMBOL = "btc/usd"
 CHAINLINK_CLIENT_ID = ""
 CHAINLINK_CLIENT_SECRET = ""
 CHAINLINK_FEED_ID = ""
@@ -61,7 +61,8 @@ TELEGRAM_BOT_TOKEN = ""
 TELEGRAM_ALERT_CHAT_ID = ""
 
 # Pyth/oracle
-PYTH_HERMES_URL = "https://hermes.pyth.network"
+# Актуальный Hermes endpoint; запросы требуют Bearer API key.
+PYTH_HERMES_URL = "https://pyth.dourolabs.app/hermes"
 PYTH_API_KEY = ""
 PYTH_BTC_USD_FEED_ID = ""
 

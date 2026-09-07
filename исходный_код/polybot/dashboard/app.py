@@ -220,7 +220,8 @@ def latest_sources(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     if "external_prices" not in table_names(connection):
         return []
     enabled = [name for name, flag in (("bybit", settings.ENABLE_BYBIT), ("okx", settings.ENABLE_OKX),
-                                        ("pyth", settings.ENABLE_PYTH)) if flag]
+                                        ("pyth", settings.ENABLE_PYTH),
+                                        ("chainlink_twap_60s", settings.ENABLE_CHAINLINK_RTDS)) if flag]
     rows = []
     for source in enabled:
         row = connection.execute(
@@ -259,7 +260,15 @@ def current_target(connection: sqlite3.Connection, slug: str | None) -> dict[str
             external_rows.append(row)
     external_prices = sorted(float(row[0]) for row in external_rows)
     external_median = external_prices[len(external_prices) // 2] if external_prices else None
-    reference_price = float(reference["reference_price"]) if reference else external_median
+    chainlink = connection.execute(
+        "SELECT price,collected_at FROM external_prices WHERE source='chainlink_twap_60s' "
+        "ORDER BY collected_at DESC LIMIT 1"
+    ).fetchone() if settings.ENABLE_CHAINLINK_RTDS else None
+    chainlink_age = age_seconds(chainlink["collected_at"]) if chainlink else None
+    chainlink_fresh = bool(chainlink and chainlink_age is not None
+                           and chainlink_age <= settings.MAX_CHAINLINK_AGE_SECONDS)
+    reference_price = (float(reference["reference_price"]) if reference else
+                       float(chainlink["price"]) if chainlink_fresh else external_median)
     side_validated = (
         (reference_price >= target_price) == (external_median >= target_price)
         if reference_price is not None and external_median is not None else None
@@ -271,8 +280,12 @@ def current_target(connection: sqlite3.Connection, slug: str | None) -> dict[str
         "distance_usd": reference_price - target_price if reference_price is not None else None,
         "distance_pct": (reference_price / target_price - 1.0) * 100.0 if reference_price is not None else None,
         "target_source": target["source"],
-        "reference_source": reference["source"] if reference else "external_median_proxy",
-        "reference_age_seconds": age_seconds(reference["collected_at"]) if reference else None,
+        "reference_source": (reference["source"] if reference else
+                             "chainlink_twap_60s" if chainlink_fresh else "external_median_proxy"),
+        "reference_age_seconds": (age_seconds(reference["collected_at"]) if reference else
+                                  chainlink_age if chainlink_fresh else None),
+        "chainlink_twap_price": float(chainlink["price"]) if chainlink else None,
+        "chainlink_twap_age_seconds": chainlink_age,
         "external_median_price": external_median,
         "target_side_validated": side_validated,
     }
@@ -285,7 +298,9 @@ def latency_metrics(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = connection.execute(
         """SELECT source,operation,ROUND(AVG(latency_ms),1) avg_ms,ROUND(MAX(latency_ms),1) max_ms,
                   SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) ok_count,COUNT(*) total_count,MAX(measured_at) last_seen
-           FROM source_metrics WHERE measured_at>=? GROUP BY source,operation ORDER BY source""",
+           FROM source_metrics
+           WHERE id>(SELECT MAX(id)-10000 FROM source_metrics) AND measured_at>=?
+           GROUP BY source,operation ORDER BY source""",
         (cutoff,),
     ).fetchall()
     return [dict(row) for row in rows]
@@ -312,6 +327,8 @@ def access_matrix(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
         {"name": "Polymarket: торговая авторизация", "configured": all(bool(getattr(api, key, "")) for key in ("POLYMARKET_PRIVATE_KEY", "POLYMARKET_API_KEY", "POLYMARKET_API_SECRET", "POLYMARKET_API_PASSPHRASE")), "observed": False},
         {"name": "Bybit public price", "configured": settings.ENABLE_BYBIT, "observed": "bybit" in seen},
         {"name": "OKX public price", "configured": settings.ENABLE_OKX, "observed": "okx" in seen},
+        {"name": "Chainlink BTC/USD TWAP 60s", "configured": settings.ENABLE_CHAINLINK_RTDS,
+         "observed": "chainlink_twap_60s" in seen},
         {"name": "Pyth oracle", "configured": settings.ENABLE_PYTH, "observed": "pyth" in seen},
         {"name": "Telegram Bot", "configured": bool(getattr(api, "TELEGRAM_BOT_TOKEN", "")), "observed": False},
         {"name": "Hugging Face", "configured": bool(getattr(api, "HUGGINGFACE_API_TOKEN", "")) or not settings.QWEN_LOCAL_FILES_ONLY, "observed": False},
@@ -398,8 +415,9 @@ def model_comparison(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     } if "training_examples" in table_names(connection) else {}
     grouped: dict[tuple[str, str], list[sqlite3.Row]] = defaultdict(list)
     for row in rows:
-        versioned_model = f"{row['bot_model']} · {row['strategy_version'] or 'legacy'}"
-        grouped[(versioned_model, str(row["bot_provider"]))].append(row)
+        provider = str(row["bot_provider"])
+        versioned_model = f"{row['bot_model']} · {row['strategy_version'] or 'legacy'} · {provider}"
+        grouped[(versioned_model, provider)].append(row)
     result = []
     for (model, provider), items in grouped.items():
         by_event: dict[str, float] = {}
@@ -453,7 +471,7 @@ def model_equity_curves(connection: sqlite3.Connection) -> dict[str, list[dict[s
     rows = connection.execute(
         """SELECT p.event_slug,p.closed_at,p.opened_at,p.realized_pnl_usdc,
                   COALESCE(d.model_name,s.model_name,'unknown') AS bot_model,
-                  s.strategy_version
+                  COALESCE(d.provider,'unknown') AS bot_provider,s.strategy_version
            FROM paper_positions p
            JOIN paper_sessions s ON s.session_id=p.session_id
            LEFT JOIN model_decisions d ON d.id=p.entry_decision_id
@@ -462,7 +480,7 @@ def model_equity_curves(connection: sqlite3.Connection) -> dict[str, list[dict[s
     ).fetchall()
     grouped: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
     for row in rows:
-        model = f"{row['bot_model']} · {row['strategy_version'] or 'legacy'}"
+        model = f"{row['bot_model']} · {row['strategy_version'] or 'legacy'} · {row['bot_provider']}"
         slug = str(row["event_slug"])
         point = grouped[model].setdefault(slug, {
             "t": str(row["closed_at"] or row["opened_at"]), "event": slug, "pnl": 0.0,
@@ -479,24 +497,46 @@ def model_equity_curves(connection: sqlite3.Connection) -> dict[str, list[dict[s
     return curves
 
 
-@_cached(300.0)
-def cached_model_analytics() -> dict[str, Any]:
-    """Тяжёлая межмодельная аналитика меняется только после новых сделок/обучения.
+_MODEL_ANALYTICS_CACHE: dict[str, Any] = {
+    "at": 0.0,
+    "value": {"paper_comparison": [], "equity_curves": {}, "health": {}},
+    "refreshing": False,
+}
+_MODEL_ANALYTICS_LOCK = threading.Lock()
 
-    Отдельное соединение позволяет безопасно хранить только готовый JSON-результат,
-    не удерживая SQLite connection между запросами дашборда.
-    """
+
+def _refresh_model_analytics() -> None:
+    """Считает bootstrap/кривые вне HTTP-запроса и публикует готовый JSON."""
     connection = connect()
-    if connection is None:
-        return {"paper_comparison": [], "equity_curves": {}, "health": {}}
     try:
-        return {
+        value = ({"paper_comparison": [], "equity_curves": {}, "health": {}}
+                 if connection is None else {
             "paper_comparison": model_comparison(connection),
             "equity_curves": model_equity_curves(connection),
             "health": model_health(connection),
-        }
+        })
+        with _MODEL_ANALYTICS_LOCK:
+            _MODEL_ANALYTICS_CACHE["value"] = value
+            _MODEL_ANALYTICS_CACHE["at"] = time.monotonic()
     finally:
-        connection.close()
+        if connection is not None:
+            connection.close()
+        with _MODEL_ANALYTICS_LOCK:
+            _MODEL_ANALYTICS_CACHE["refreshing"] = False
+
+
+def cached_model_analytics() -> dict[str, Any]:
+    """Немедленно отдаёт cache; просроченную аналитику обновляет в фоне."""
+    with _MODEL_ANALYTICS_LOCK:
+        stale = time.monotonic() - float(_MODEL_ANALYTICS_CACHE["at"]) >= 300.0
+        if stale and not _MODEL_ANALYTICS_CACHE["refreshing"]:
+            _MODEL_ANALYTICS_CACHE["refreshing"] = True
+            threading.Thread(
+                target=_refresh_model_analytics,
+                name="dashboard-model-analytics",
+                daemon=True,
+            ).start()
+        return dict(_MODEL_ANALYTICS_CACHE["value"])
 
 
 def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
@@ -507,7 +547,14 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
         "open_positions": [], "recent_positions": [], "recent_actions": [], "resolved_events": 0,
         "misalignment_signals": 0, "misalignment_executed": 0, "misalignment_pnl": 0.0,
         "metrics": {}, "loss_streak": 0, "fees": 0.0, "counterfactual": {}, "ml_policy_metrics": {},
-        "execution": {"orders": 0, "filled": 0, "partial": 0, "unfilled": 0, "fill_rate": 0.0, "average_latency_ms": 0.0},
+        "execution": {"orders": 0, "filled": 0, "partial": 0, "unfilled": 0, "fill_rate": 0.0,
+                      "average_latency_ms": 0.0, "average_entry_price": None,
+                      "weighted_average_entry_price": None, "entry_fills": 0,
+                      "entry_filled_shares": 0.0, "average_entry_latency_ms": None,
+                      "average_entry_slippage_bps": None, "average_exit_price": None,
+                      "weighted_average_exit_price": None, "exit_fills": 0,
+                      "exit_filled_shares": 0.0, "average_exit_latency_ms": None,
+                      "average_exit_slippage_bps": None},
     }
     if connection is None or "paper_sessions" not in table_names(connection):
         return empty
@@ -538,9 +585,14 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
                   predicted_up_probability,predicted_down_probability,expected_net_edge
            FROM model_decisions WHERE session_id=? ORDER BY id DESC LIMIT 40""", (session_data["session_id"],)
     ).fetchall()]
+    # Оперативная панель показывает rolling-окно. Полный исторический разбор
+    # остаётся в offline-отчётах: скан миллионов WAIT каждые 15 секунд раньше
+    # задерживал интерфейс и конкурировал за CPU с торговлей.
     ml_rows = [dict(row) for row in connection.execute(
-        """SELECT action,confidence,tags_json,executed FROM model_decisions
-           WHERE session_id=? AND tags_json LIKE '%ml_autonomous_policy%'""",
+        """SELECT action,confidence,tags_json,executed FROM (
+             SELECT session_id,action,confidence,tags_json,executed
+             FROM model_decisions ORDER BY id DESC LIMIT 10000
+           ) WHERE session_id=? AND tags_json LIKE '%ml_autonomous_policy%'""",
         (session_data["session_id"],),
     ).fetchall()]
     ml_policy_metrics: dict[str, Any] = {
@@ -611,8 +663,11 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
         (session_data["session_id"],),
     ).fetchone()[0]
     misalignment = connection.execute(
-        """SELECT COUNT(*),SUM(executed) FROM model_decisions
-           WHERE session_id=? AND tags_json LIKE '%consensus_misalignment%'""", (session_data["session_id"],)
+        """SELECT COUNT(*),SUM(executed) FROM (
+             SELECT session_id,tags_json,executed FROM model_decisions
+             ORDER BY id DESC LIMIT 10000
+           ) WHERE session_id=? AND tags_json LIKE '%consensus_misalignment%'""",
+        (session_data["session_id"],)
     ).fetchone()
     misalignment_pnl = connection.execute(
         """SELECT COALESCE(SUM(p.realized_pnl_usdc),0) FROM paper_positions p
@@ -650,7 +705,14 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
     valid_cash = float(session_data["initial_balance_usdc"]) + valid_realized - sum(
         float(row.get("cost_usdc") or 0) for row in valid_open
     )
-    execution = {"orders": 0, "filled": 0, "partial": 0, "unfilled": 0, "fill_rate": 0.0, "average_latency_ms": 0.0}
+    execution = {"orders": 0, "filled": 0, "partial": 0, "unfilled": 0, "fill_rate": 0.0,
+                 "average_latency_ms": 0.0, "average_entry_price": None,
+                 "weighted_average_entry_price": None, "entry_fills": 0,
+                 "entry_filled_shares": 0.0, "average_entry_latency_ms": None,
+                 "average_entry_slippage_bps": None, "average_exit_price": None,
+                 "weighted_average_exit_price": None, "exit_fills": 0,
+                 "exit_filled_shares": 0.0, "average_exit_latency_ms": None,
+                 "average_exit_slippage_bps": None}
     order_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(paper_orders)")}
     if {"fill_probability", "latency_ms", "execution_reason"}.issubset(order_columns):
         execution_row = connection.execute(
@@ -677,6 +739,66 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
                 "average_book_age_ms_at_fill": float(execution_row[8] or 0),
                 "fill_probability_kind": settings.EXECUTION_FILL_PROBABILITY_KIND,
             }
+        entry_price_row = connection.execute(
+            """SELECT COUNT(*) entry_fills,
+                      AVG(COALESCE(filled_price,requested_price)) average_entry_price,
+                      SUM(COALESCE(filled_price,requested_price)*shares)/NULLIF(SUM(shares),0)
+                          weighted_average_entry_price,
+                      SUM(shares) entry_filled_shares,
+                      AVG(latency_ms) average_entry_latency_ms,
+                      AVG(observed_slippage_bps) average_entry_slippage_bps
+               FROM paper_orders
+               WHERE session_id=? AND action LIKE 'BUY_%' AND shares>0
+                 AND COALESCE(execution_valid,1)=1""",
+            (session_data["session_id"],),
+        ).fetchone()
+        if entry_price_row:
+            execution.update({
+                "entry_fills": int(entry_price_row[0] or 0),
+                "average_entry_price": (
+                    float(entry_price_row[1]) if entry_price_row[1] is not None else None
+                ),
+                "weighted_average_entry_price": (
+                    float(entry_price_row[2]) if entry_price_row[2] is not None else None
+                ),
+                "entry_filled_shares": float(entry_price_row[3] or 0.0),
+                "average_entry_latency_ms": (
+                    float(entry_price_row[4]) if entry_price_row[4] is not None else None
+                ),
+                "average_entry_slippage_bps": (
+                    float(entry_price_row[5]) if entry_price_row[5] is not None else None
+                ),
+            })
+        exit_price_row = connection.execute(
+            """SELECT COUNT(*) exit_fills,
+                      AVG(COALESCE(filled_price,requested_price)) average_exit_price,
+                      SUM(COALESCE(filled_price,requested_price)*shares)/NULLIF(SUM(shares),0)
+                          weighted_average_exit_price,
+                      SUM(shares) exit_filled_shares,
+                      AVG(latency_ms) average_exit_latency_ms,
+                      AVG(observed_slippage_bps) average_exit_slippage_bps
+               FROM paper_orders
+               WHERE session_id=? AND action IN ('CLOSE','PARTIAL_CLOSE','SELL') AND shares>0
+                 AND COALESCE(execution_valid,1)=1""",
+            (session_data["session_id"],),
+        ).fetchone()
+        if exit_price_row:
+            execution.update({
+                "exit_fills": int(exit_price_row[0] or 0),
+                "average_exit_price": (
+                    float(exit_price_row[1]) if exit_price_row[1] is not None else None
+                ),
+                "weighted_average_exit_price": (
+                    float(exit_price_row[2]) if exit_price_row[2] is not None else None
+                ),
+                "exit_filled_shares": float(exit_price_row[3] or 0.0),
+                "average_exit_latency_ms": (
+                    float(exit_price_row[4]) if exit_price_row[4] is not None else None
+                ),
+                "average_exit_slippage_bps": (
+                    float(exit_price_row[5]) if exit_price_row[5] is not None else None
+                ),
+            })
     extended = _extended_metrics(
         closed_pnls, float(session_data.get("total_fees_usdc", 0) or 0), session_data.get("started_at")
     )
@@ -740,6 +862,7 @@ def paper_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
     }
 
 
+@_cached(60.0)
 def next_event_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
     empty = {"enabled": settings.NEXT_EVENT_CONTEXT_ENABLED, "latest": None, "evaluated": 0,
              "direction_accuracy": None, "hypothetical_fills": 0, "hypothetical_pnl_usdc": 0.0,
@@ -800,6 +923,79 @@ def next_event_overview(connection: sqlite3.Connection | None) -> dict[str, Any]
         "raw_samples": raw_samples,
         "active_shadow_orders": active_orders, "shadow_order_history": lifecycle,
     }
+def _display_settle_ended_live_positions(
+    connection: sqlite3.Connection, positions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Строит read-only economic settlement, пока engine ждёт официальный label."""
+    current = datetime.now(UTC)
+    tables = set(table_names(connection))
+    if "market_snapshots" not in tables:
+        return positions
+    result: list[dict[str, Any]] = []
+    for original in positions:
+        row = dict(original)
+        if row.get("status") != "open":
+            result.append(row)
+            continue
+        try:
+            event_end_epoch = int(str(row["event_slug"]).rsplit("-", 1)[-1]) + 300
+            event_end = datetime.fromtimestamp(event_end_epoch, UTC)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            result.append(row)
+            continue
+        if (current - event_end).total_seconds() < settings.PAPER_POST_EVENT_SETTLEMENT_DELAY_SECONDS:
+            result.append(row)
+            continue
+        cutoff = (event_end - timedelta(
+            seconds=float(settings.PAPER_POST_EVENT_MAX_QUOTE_DISTANCE_SECONDS)
+        )).isoformat()
+        quotes = connection.execute(
+            """SELECT outcome,best_bid,best_ask FROM market_snapshots
+               WHERE event_slug=? AND collected_at>=? ORDER BY collected_at DESC,id DESC""",
+            (row["event_slug"], cutoff),
+        ).fetchall()
+        latest: dict[str, sqlite3.Row] = {}
+        for quote in quotes:
+            latest.setdefault(str(quote["outcome"]), quote)
+        outcome = str(row.get("outcome"))
+        held = latest.get(outcome)
+        other = latest.get("Down" if outcome == "Up" else "Up")
+        label: int | None = None
+        source: str | None = None
+        if held is not None:
+            held_bid = float(held["best_bid"] or 0.0)
+            held_ask = float(held["best_ask"] or 1.0)
+            other_bid = float(other["best_bid"] or 0.0) if other is not None else 0.0
+            if held_bid >= settings.PAPER_POST_EVENT_WIN_BID_THRESHOLD:
+                label, source = 1, "dashboard_post_event_extreme_quote"
+            elif (held_ask <= settings.PAPER_POST_EVENT_LOSS_ASK_THRESHOLD
+                  or other_bid >= settings.PAPER_POST_EVENT_WIN_BID_THRESHOLD):
+                label, source = 0, "dashboard_post_event_extreme_quote"
+        if label is None and "reference_price_snapshots" in tables:
+            reference = connection.execute(
+                """SELECT target_price,reference_price FROM reference_price_snapshots
+                   WHERE event_slug=? AND reference_price IS NOT NULL
+                     AND ABS(unixepoch(collected_at)-?)<=?
+                   ORDER BY ABS(unixepoch(collected_at)-?) ASC,id DESC LIMIT 1""",
+                (row["event_slug"], event_end_epoch,
+                 float(settings.PAPER_POST_EVENT_MAX_QUOTE_DISTANCE_SECONDS), event_end_epoch),
+            ).fetchone()
+            if reference is not None:
+                up_label = int(float(reference["reference_price"]) >= float(reference["target_price"]))
+                label = up_label if outcome == "Up" else 1 - up_label
+                source = "dashboard_post_event_reference_price"
+        if label is not None:
+            row.update({
+                "status": "provisionally_resolved", "current_price": float(label),
+                "close_price": float(label),
+                "realized_pnl_usdc": float(row.get("shares") or 0) * label
+                                      - float(row.get("cost_usdc") or 0),
+                "dashboard_provisional": True, "settlement_source": source,
+            })
+        result.append(row)
+    return result
+
+
 def live_overview(connection: sqlite3.Connection | None, initial_balance: float) -> dict[str, Any]:
     """Локальный LIVE-ledger, отделённый от demo-сессии и бумажного капитала."""
     empty = {
@@ -808,24 +1004,33 @@ def live_overview(connection: sqlite3.Connection | None, initial_balance: float)
         "total_wagered": 0.0, "open_positions": [], "recent_positions": [],
         "recent_actions": [], "resolved_events": 0, "misalignment_executed": 0,
         "misalignment_pnl": 0.0, "metrics": {}, "loss_streak": 0, "fees": 0.0,
-        "execution": {"orders": 0, "filled": 0, "partial": 0, "unfilled": 0, "fill_rate": 0.0, "average_latency_ms": 0.0},
+        "execution": {"orders": 0, "filled": 0, "partial": 0, "unfilled": 0, "fill_rate": 0.0,
+                      "average_latency_ms": 0.0, "average_entry_price": None,
+                      "weighted_average_entry_price": None, "entry_fills": 0,
+                      "entry_filled_shares": 0.0, "average_entry_latency_ms": None,
+                      "average_entry_slippage_bps": None, "average_exit_price": None,
+                      "weighted_average_exit_price": None, "exit_fills": 0,
+                      "exit_filled_shares": 0.0, "average_exit_latency_ms": None,
+                      "average_exit_slippage_bps": None},
         "model": "unknown", "source": "live", "balance_note": "локальный ledger, не баланс кошелька",
     }
     if connection is None or "live_positions" not in table_names(connection):
         return empty
+    mode_since = connection.execute(
+        "SELECT updated_at FROM runtime_controls WHERE control_key='trading_mode' AND control_value='live'"
+    ).fetchone()
+    action_since = str(mode_since[0]) if mode_since else "1970-01-01T00:00:00+00:00"
     positions = [dict(row) for row in connection.execute(
         """SELECT p.*,COALESCE(d.model_name,'unknown') bot_model,
                   COALESCE(d.provider,'unknown') bot_provider
            FROM live_positions p LEFT JOIN model_decisions d ON d.id=p.entry_decision_id
-           ORDER BY p.id DESC LIMIT 50"""
+           WHERE p.opened_at>=? ORDER BY p.opened_at DESC,p.id DESC""",
+        (action_since,),
     ).fetchall()]
     positions = [row for row in positions if int(row.get("execution_valid", 1) or 0) == 1]
+    positions = _display_settle_ended_live_positions(connection, positions)
     if not positions:
         return empty
-    mode_since = connection.execute(
-        "SELECT updated_at FROM runtime_controls WHERE control_key='trading_mode' AND control_value='live'"
-    ).fetchone()
-    action_since = str(mode_since[0]) if mode_since else min(str(row["opened_at"]) for row in positions)
     actions = [dict(row) for row in connection.execute(
         """SELECT observed_at,event_slug,action,confidence,reason,tags_json,executed,
                   predicted_up_probability,predicted_down_probability,expected_net_edge,
@@ -833,7 +1038,12 @@ def live_overview(connection: sqlite3.Connection | None, initial_balance: float)
            FROM model_decisions WHERE observed_at>=? ORDER BY id DESC LIMIT 100""",
         (action_since,),
     ).fetchall()]
-    closed = [row for row in positions if row.get("status") in {"closed", "resolved"}]
+    # LIVE-пятиминутка может иметь экономически однозначный результат по
+    # финальному 0.99/0.01 раньше часовой официальной разметки. Такой результат
+    # показываем отдельно как provisional и позднее автоматически сверяем.
+    closed = [row for row in positions if row.get("status") in {
+        "closed", "resolved", "provisionally_resolved",
+    }]
     opened = [row for row in positions if row.get("status") == "open"]
     realized = sum(float(row.get("realized_pnl_usdc") or 0) for row in closed)
     unrealized = sum(
@@ -855,30 +1065,106 @@ def live_overview(connection: sqlite3.Connection | None, initial_balance: float)
         "down_entries": sum(row.get("outcome") == "Down" for row in positions),
     }
     order_count = filled = partial = unfilled = 0
+    entry_price_metrics = {
+        "average_entry_price": None, "weighted_average_entry_price": None,
+        "entry_fills": 0, "entry_filled_shares": 0.0,
+        "average_entry_latency_ms": None, "average_entry_slippage_bps": None,
+        "average_exit_price": None, "weighted_average_exit_price": None,
+        "exit_fills": 0, "exit_filled_shares": 0.0,
+        "average_exit_latency_ms": None, "average_exit_slippage_bps": None,
+    }
     recent_orders: list[dict[str, Any]] = []
     if "live_orders" in table_names(connection):
-        order_rows = connection.execute("SELECT status,COUNT(*) FROM live_orders GROUP BY status").fetchall()
+        order_rows = connection.execute(
+            "SELECT status,COUNT(*) FROM live_orders WHERE created_at>=? GROUP BY status", (action_since,),
+        ).fetchall()
         recent_orders = [dict(row) for row in connection.execute(
             """SELECT id,event_slug,outcome,side,order_id,order_type,requested_price,
                       requested_size,matched_size,status,created_at,expiration_at,last_checked_at,
                       error,execution_valid,invalid_reason,average_fill_price,
                       fill_notional_usdc,fee_usdc,fill_source
-               FROM live_orders ORDER BY id DESC LIMIT 30"""
+               FROM live_orders WHERE created_at>=? ORDER BY id DESC LIMIT 30""",
+            (action_since,),
         ).fetchall()]
         order_count = sum(int(row[1]) for row in order_rows)
         filled = sum(int(row[1]) for row in order_rows if row[0] == "filled")
         partial = sum(int(row[1]) for row in order_rows if row[0] in {"partial", "partially_filled", "partial_cancelled"})
         unfilled = order_count - filled - partial
+        entry_price_row = connection.execute(
+            """SELECT COUNT(*),
+                      AVG(COALESCE(average_fill_price,requested_price)),
+                      SUM(COALESCE(fill_notional_usdc,
+                                   matched_size*COALESCE(average_fill_price,requested_price)))
+                          /NULLIF(SUM(matched_size),0),
+                      SUM(matched_size),
+                      AVG((julianday(last_checked_at)-julianday(created_at))*86400000.0),
+                      AVG((COALESCE(average_fill_price,requested_price)-requested_price)
+                          /NULLIF(requested_price,0)*10000.0)
+               FROM live_orders
+               WHERE UPPER(side)='BUY' AND matched_size>0
+                 AND COALESCE(execution_valid,1)=1 AND created_at>=?""",
+            (action_since,),
+        ).fetchone()
+        if entry_price_row:
+            entry_price_metrics = {
+                "entry_fills": int(entry_price_row[0] or 0),
+                "average_entry_price": (
+                    float(entry_price_row[1]) if entry_price_row[1] is not None else None
+                ),
+                "weighted_average_entry_price": (
+                    float(entry_price_row[2]) if entry_price_row[2] is not None else None
+                ),
+                "entry_filled_shares": float(entry_price_row[3] or 0.0),
+                "average_entry_latency_ms": (
+                    float(entry_price_row[4]) if entry_price_row[4] is not None else None
+                ),
+                "average_entry_slippage_bps": (
+                    float(entry_price_row[5]) if entry_price_row[5] is not None else None
+                ),
+            }
+        exit_price_row = connection.execute(
+            """SELECT COUNT(*),
+                      AVG(COALESCE(average_fill_price,requested_price)),
+                      SUM(COALESCE(fill_notional_usdc,
+                                   matched_size*COALESCE(average_fill_price,requested_price)))
+                          /NULLIF(SUM(matched_size),0),
+                      SUM(matched_size),
+                      AVG((julianday(last_checked_at)-julianday(created_at))*86400000.0),
+                      AVG((requested_price-COALESCE(average_fill_price,requested_price))
+                          /NULLIF(requested_price,0)*10000.0)
+               FROM live_orders
+               WHERE UPPER(side)='SELL' AND matched_size>0
+                 AND COALESCE(execution_valid,1)=1 AND created_at>=?""",
+            (action_since,),
+        ).fetchone()
+        if exit_price_row:
+            entry_price_metrics.update({
+                "exit_fills": int(exit_price_row[0] or 0),
+                "average_exit_price": (
+                    float(exit_price_row[1]) if exit_price_row[1] is not None else None
+                ),
+                "weighted_average_exit_price": (
+                    float(exit_price_row[2]) if exit_price_row[2] is not None else None
+                ),
+                "exit_filled_shares": float(exit_price_row[3] or 0.0),
+                "average_exit_latency_ms": (
+                    float(exit_price_row[4]) if exit_price_row[4] is not None else None
+                ),
+                "average_exit_slippage_bps": (
+                    float(exit_price_row[5]) if exit_price_row[5] is not None else None
+                ),
+            })
     model = next((row.get("bot_model") for row in positions if row.get("bot_model") != "unknown"), "unknown")
     return {
         **empty, "initial_balance": initial_balance, "cash": initial_balance + realized - sum(float(row.get("cost_usdc") or 0) for row in opened),
         "equity": initial_balance + realized + unrealized, "realized_pnl": realized,
         "unrealized_pnl": unrealized, "total_wagered": wagered, "open_positions": opened,
-        "recent_positions": positions, "recent_actions": actions,
+        "recent_positions": positions[:50], "recent_actions": actions,
         "resolved_events": len({row["event_slug"] for row in closed}), "metrics": metrics,
         "execution": {"orders": order_count, "filled": filled, "partial": partial, "unfilled": unfilled,
                       "fill_rate": (filled + partial) / order_count if order_count else 0.0,
-                      "average_fill_probability": None, "average_latency_ms": 0.0},
+                      "average_fill_probability": None, "average_latency_ms": 0.0,
+                      **entry_price_metrics},
         "recent_orders": recent_orders,
         "fees": live_fees,
         "model": model,
@@ -1044,6 +1330,14 @@ def model_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
                 target.update(json.loads(path.read_text(encoding="utf-8")))
             except (OSError, json.JSONDecodeError):
                 target["error"] = f"unreadable report: {path.name}"
+    timeseries_challenger: dict[str, Any] = {}
+    if settings.TIMESERIES_CHALLENGER_REPORT_PATH.exists():
+        try:
+            timeseries_challenger = json.loads(
+                settings.TIMESERIES_CHALLENGER_REPORT_PATH.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            timeseries_challenger = {"error": "ARIMA/GARCH shadow report is unreadable"}
     latest_training: dict[str, Any] = {}
     candidates = sorted(
         settings.MODEL_CANDIDATE_DIR.glob("cycle_*/training_report.json"),
@@ -1075,6 +1369,7 @@ def model_overview(connection: sqlite3.Connection | None) -> dict[str, Any]:
         "regime_entry_v5": regime_entry_v5,
         "history_context": history_context,
         "loss_reversal": loss_reversal,
+        "timeseries_challenger": timeseries_challenger,
         "latest_training_cycle": latest_training,
         "switch_allowed": connection is not None,
         "switch_policy": "immediate_when_flat_or_within_5_minutes",
@@ -1170,6 +1465,145 @@ def _fast_table_counts(connection: sqlite3.Connection, tables: list[str]) -> dic
     return result
 
 
+def decision_diagnostics(connection: sqlite3.Connection | None) -> dict[str, Any]:
+    """Объясняет WAIT, reference и paper-fill без подмены оценки фактом."""
+    empty = {"decisions": 0, "wait": 0, "executed": 0, "wait_categories": {},
+             "ml_wait": {}, "reference": {}, "limit_orders": {}}
+    if connection is None:
+        return empty
+    tables = set(table_names(connection))
+    if "model_decisions" not in tables:
+        return empty
+    session = connection.execute(
+        "SELECT session_id FROM paper_sessions ORDER BY started_at DESC LIMIT 1"
+    ).fetchone() if "paper_sessions" in tables else None
+    condition, values = ("WHERE session_id=?", (str(session[0]),)) if session else ("", ())
+    rows = connection.execute(
+        f"SELECT action,tags_json,executed FROM model_decisions {condition} ORDER BY id DESC LIMIT 5000",
+        values,
+    ).fetchall()
+    categories: Counter[str] = Counter()
+    buy_gaps: list[float] = []
+    for row in rows:
+        if str(row["action"]) != "WAIT":
+            continue
+        try:
+            tags = [str(value) for value in json.loads(row["tags_json"] or "[]")]
+        except (TypeError, json.JSONDecodeError):
+            tags = []
+        tag_set = set(tags)
+        if "invalid_target_price" in tag_set:
+            categories["Не получен Price to Beat"] += 1
+        elif "invalid_reference_price" in tag_set or "invalid_market_data" in tag_set:
+            categories["Нет свежей текущей цены BTC"] += 1
+        elif "ml_no_buy_candidate" in tag_set:
+            categories["Нет допустимой limit-цены/размера"] += 1
+        elif "ml_entry_argmax" in tag_set:
+            categories["ML: WAIT имеет максимальную utility"] += 1
+        elif "entry_model_low_confidence_wait" in tag_set:
+            categories["Низкая уверенность направления"] += 1
+        elif "value_gate_reject" in tag_set or "no_positive_edge" in tag_set:
+            categories["Нет net edge после цены и комиссии"] += 1
+        elif "book_unavailable" in tag_set or "stale_market_data" in tag_set:
+            categories["Стакан отсутствует или устарел"] += 1
+        else:
+            categories["Прочее / позиция не открыта"] += 1
+        values_by_key = dict(tag.split("=", 1) for tag in tags if "=" in tag)
+        if "ml_entry_argmax" in tag_set:
+            try:
+                wait_utility = float(values_by_key["best_utility"])
+            except (KeyError, ValueError):
+                continue
+            buy_scores = []
+            for score in values_by_key.get("top_action_scores", "").split(";"):
+                if score.startswith("BUY_") and "=" in score:
+                    try:
+                        buy_scores.append(float(score.rsplit("=", 1)[1]))
+                    except ValueError:
+                        pass
+            if buy_scores:
+                buy_gaps.append(max(buy_scores) - wait_utility)
+    result = {**empty, "decisions": len(rows),
+              "wait": sum(str(row["action"]) == "WAIT" for row in rows),
+              "executed": sum(int(row["executed"] or 0) for row in rows),
+              "wait_categories": dict(categories)}
+    if buy_gaps:
+        result["ml_wait"] = {
+            "observations": len(buy_gaps),
+            "mean_buy_minus_wait_utility": mean(buy_gaps),
+            "near_entry_share": sum(gap >= -0.02 for gap in buy_gaps) / len(buy_gaps),
+            "meaning": "negative means WAIT was more useful; near-entry is within $0.02 utility",
+        }
+    if {"event_targets", "external_prices"}.issubset(tables):
+        target = connection.execute(
+            "SELECT event_slug,target_price,completed,latest_reference_price,fetched_at "
+            "FROM event_targets ORDER BY fetched_at DESC LIMIT 1"
+        ).fetchone()
+        latest_sources = connection.execute(
+            """SELECT p.source,p.collected_at,p.price FROM external_prices p JOIN
+               (SELECT source,MAX(id) id FROM external_prices
+                WHERE source IN ('bybit','okx','pyth','chainlink_twap_60s') GROUP BY source) x
+               ON p.id=x.id"""
+        ).fetchall()
+        now_utc = datetime.now(UTC)
+        enabled_sources = {
+            "bybit": (bool(settings.ENABLE_BYBIT), float(settings.MAX_EXCHANGE_AGE_SECONDS)),
+            "okx": (bool(settings.ENABLE_OKX), float(settings.MAX_EXCHANGE_AGE_SECONDS)),
+            "pyth": (bool(settings.ENABLE_PYTH), float(settings.MAX_PYTH_AGE_SECONDS)),
+            "chainlink_twap_60s": (bool(settings.ENABLE_CHAINLINK_RTDS), float(settings.MAX_CHAINLINK_AGE_SECONDS)),
+        }
+        fresh_sources = []
+        source_status = []
+        for row in latest_sources:
+            source = str(row["source"])
+            age = max(0.0, (now_utc - datetime.fromisoformat(str(row["collected_at"]))).total_seconds())
+            enabled, limit = enabled_sources.get(source, (False, 0.0))
+            source_status.append({"source": source, "price": float(row["price"]),
+                                  "age_seconds": age, "enabled": enabled,
+                                  "fresh": bool(enabled and age <= limit), "max_age_seconds": limit})
+            if enabled and age <= limit:
+                fresh_sources.append({"source": source, "price": float(row["price"]), "age_seconds": age})
+        chainlink_row = next((row for row in source_status if row["source"] == "chainlink_twap_60s"), None)
+        chainlink_observed = chainlink_row is not None
+        chainlink_fresh = bool(chainlink_row and chainlink_row["fresh"])
+        if not settings.ENABLE_CHAINLINK_RTDS:
+            oracle_reason = "Chainlink TWAP отключён"
+        elif not chainlink_observed:
+            oracle_reason = "ожидается первый Chainlink TWAP 60s тик"
+        elif not chainlink_fresh:
+            oracle_reason = f"Chainlink TWAP устарел: {chainlink_row['age_seconds']:.1f}с"
+        else:
+            oracle_reason = f"Chainlink TWAP актуален: {chainlink_row['age_seconds']:.1f}с"
+        live_proxy = ("Chainlink BTC/USD TWAP 60s" if chainlink_fresh else
+                      "median(" + ", ".join(row["source"] for row in fresh_sources
+                                             if row["source"] != "chainlink_twap_60s") + ") fallback")
+        result["reference"] = {
+            "event_slug": str(target["event_slug"]) if target else None,
+            "price_to_beat": float(target["target_price"]) if target else None,
+            "official_close_available": bool(target and target["latest_reference_price"] is not None),
+            "official_close_expected_before_resolution": False,
+            "live_proxy": live_proxy if fresh_sources else "нет свежего live reference",
+            "sources": fresh_sources,
+            "source_status": source_status,
+            "oracle": {"name": "Chainlink TWAP 60s", "enabled": bool(settings.ENABLE_CHAINLINK_RTDS),
+                       "credentials_required": False, "observed": chainlink_observed, "fresh": chainlink_fresh,
+                       "reason": oracle_reason},
+        }
+    if "paper_orders" in tables:
+        order_condition, order_values = ("WHERE session_id=?", (str(session[0]),)) if session else ("", ())
+        order_rows = connection.execute(
+            f"SELECT status,execution_reason,COUNT(*) n FROM paper_orders {order_condition} GROUP BY 1,2",
+            order_values,
+        ).fetchall()
+        result["limit_orders"] = {
+            "orders": sum(int(row["n"]) for row in order_rows),
+            "by_result": [{"status": str(row["status"]), "reason": str(row["execution_reason"] or ""),
+                           "count": int(row["n"])} for row in order_rows],
+            "fill_probability_is_estimate": True,
+        }
+    return result
+
+
 @app.get("/api/overview")
 @_cached(15.0)
 def overview() -> dict[str, Any]:
@@ -1182,6 +1616,7 @@ def overview() -> dict[str, Any]:
     engine_process_alive = False
     validation_status = "unknown"
     live_advisory: dict[str, Any] = {"desirable": False, "failures": ["нет доступной торговой статистики"]}
+    diagnostics = decision_diagnostics(None)
     if connection is None:
         sources: list[dict[str, Any]] = []
         database = {"exists": False, "path": str(settings.DATABASE_PATH), "counts": {}, "latest_run": None, "current_event": None}
@@ -1218,6 +1653,7 @@ def overview() -> dict[str, Any]:
             if not engine_process_alive:
                 engine_state = "stopped"
             models = model_overview(connection)
+            diagnostics = decision_diagnostics(connection)
             live = live_overview(connection, settings.PAPER_INITIAL_BALANCE_USDC * live_scale)
             models.update(cached_model_analytics())
             latest_session = connection.execute(
@@ -1272,8 +1708,9 @@ def overview() -> dict[str, Any]:
             "notionals_usdc": settings.ML_POLICY_NOTIONALS_USDC,
             "metrics": paper.get("ml_policy_metrics", {}),
         },
+        "decision_diagnostics": diagnostics,
         "project_summary": summary,
-        "trading": {"mode": mode if connection is not None else "paper", "requested_mode": requested_mode, "mode_switch_state": mode_switch_state, "engine_state": engine_state if connection is not None else "stopped", "engine_process_alive": engine_process_alive if connection is not None else False, "live_enabled": mode == "live", "live_advisory": live_advisory, "live_executor_implemented": settings.LIVE_EXECUTOR_IMPLEMENTED, "live_keys_rotated": settings.LIVE_KEYS_ROTATED_AFTER_AUDIT, "live_scale": live_scale, "live_scale_min": settings.LIVE_SCALE_MIN, "live_scale_max": settings.LIVE_SCALE_MAX, "live_effective_budget_usdc": settings.PAPER_INITIAL_BALANCE_USDC * live_scale, "live_effective_max_position_usdc": settings.MAX_POSITION_USDC * live_scale, "live_canary_max_loss_usdc": settings.LIVE_CANARY_MAX_LOSS_USDC, "kill_switch": settings.KILL_SWITCH, "max_position_usdc": settings.MAX_POSITION_USDC, "max_daily_loss_usdc": settings.MAX_DAILY_LOSS_USDC, "max_consecutive_losses": settings.MAX_CONSECUTIVE_LOSSES, "max_consecutive_wrong_directions": settings.MAX_CONSECUTIVE_WRONG_DIRECTIONS, "validation_hard_stop_age_seconds": settings.VALIDATION_HARD_STOP_AGE_SECONDS, "validation_hard_stop_cycles": settings.VALIDATION_HARD_STOP_CONSECUTIVE_CYCLES, "validation_status": validation_status, "entry_order_type": settings.ENTRY_ORDER_TYPE, "exit_order_type": settings.EXIT_ORDER_TYPE, "next_event_shadow_enabled": settings.NEXT_EVENT_PREOPEN_SHADOW_ENABLED, "next_event_live_enabled": settings.NEXT_EVENT_PREOPEN_LIVE_ENABLED, "early_entry": settings.EARLY_ENTRY_ENABLED, "early_exit": settings.EARLY_EXIT_ENABLED, "full_exit_only": settings.FULL_EXIT_ONLY_ENABLED, "entry_grid_enabled": settings.ENTRY_GRID_ENABLED, "entry_grid_live_enabled": settings.ENTRY_GRID_LIVE_ENABLED, "entry_grid_orders": [settings.ENTRY_GRID_MIN_ORDERS, settings.ENTRY_GRID_MAX_ORDERS], "entry_grid_price_step": settings.ENTRY_GRID_PRICE_STEP, "entry_grid_min_order_usdc": settings.ENTRY_GRID_MIN_ORDER_USDC, "entry_confidence": settings.MIN_ENTRY_CONFIDENCE, "max_held_win_probability_for_exit": settings.MAX_HELD_WIN_PROBABILITY_FOR_EXIT, "partial_exit_confidence": settings.PARTIAL_EXIT_CONFIDENCE, "entry_notional_usdc": settings.PAPER_ENTRY_NOTIONAL_USDC, "max_entry_price": settings.PAPER_MAX_ENTRY_PRICE, "min_entry_price": settings.PAPER_MIN_ENTRY_PRICE, "min_entry_edge": settings.PAPER_MIN_ENTRY_NET_EDGE, "value_safety_margin": settings.ENTRY_VALUE_SAFETY_MARGIN, "min_expected_pnl": settings.ACTION_VALUE_MIN_EXPECTED_PNL_USDC, "probability_model_weight": settings.ACTION_PROBABILITY_MODEL_WEIGHT, "adaptive_position_sizing": settings.ADAPTIVE_POSITION_SIZING_ENABLED, "position_size_tiers": settings.POSITION_SIZE_EDGE_TIERS, "realistic_execution": settings.EXECUTION_SIMULATION_ENABLED, "model_time_gates_enabled": settings.MODEL_TIME_GATES_ENABLED, "entry_start_seconds": settings.PAPER_MIN_ENTRY_SECONDS_AFTER_OPEN, "last_entry_remaining_seconds": settings.PAPER_LAST_ENTRY_SECONDS_BEFORE_CLOSE, "five_stage_exit": settings.FIVE_STAGE_EXIT_ENABLED, "exit_profit_steps": settings.EXIT_STAGE_PROFIT_RETURN_PCT, "exit_risk_steps": settings.EXIT_STAGE_MAX_HELD_PROBABILITY, "action_value": action_value_overview()},
+        "trading": {"mode": mode if connection is not None else "paper", "requested_mode": requested_mode, "mode_switch_state": mode_switch_state, "engine_state": engine_state if connection is not None else "stopped", "engine_process_alive": engine_process_alive if connection is not None else False, "live_enabled": mode == "live", "live_advisory": live_advisory, "live_executor_implemented": settings.LIVE_EXECUTOR_IMPLEMENTED, "live_keys_rotated": settings.LIVE_KEYS_ROTATED_AFTER_AUDIT, "live_scale": live_scale, "live_scale_min": settings.LIVE_SCALE_MIN, "live_scale_max": settings.LIVE_SCALE_MAX, "live_effective_budget_usdc": settings.PAPER_INITIAL_BALANCE_USDC * live_scale, "live_effective_max_position_usdc": settings.MAX_POSITION_USDC * live_scale, "live_canary_max_loss_usdc": settings.LIVE_CANARY_MAX_LOSS_USDC, "kill_switch": settings.KILL_SWITCH, "max_position_usdc": settings.MAX_POSITION_USDC, "max_daily_loss_usdc": settings.MAX_DAILY_LOSS_USDC, "max_consecutive_losses": settings.MAX_CONSECUTIVE_LOSSES, "max_consecutive_wrong_directions": settings.MAX_CONSECUTIVE_WRONG_DIRECTIONS, "validation_hard_stop_age_seconds": settings.VALIDATION_HARD_STOP_AGE_SECONDS, "validation_hard_stop_cycles": settings.VALIDATION_HARD_STOP_CONSECUTIVE_CYCLES, "validation_status": validation_status, "entry_order_type": settings.ENTRY_ORDER_TYPE, "exit_order_type": settings.EXIT_ORDER_TYPE, "next_event_shadow_enabled": settings.NEXT_EVENT_PREOPEN_SHADOW_ENABLED, "next_event_live_enabled": settings.NEXT_EVENT_PREOPEN_LIVE_ENABLED, "early_entry": settings.EARLY_ENTRY_ENABLED, "early_exit": settings.EARLY_EXIT_ENABLED, "early_exit_execution": settings.EARLY_EXIT_EXECUTION_ENABLED, "full_exit_only": settings.FULL_EXIT_ONLY_ENABLED, "entry_grid_enabled": settings.ENTRY_GRID_ENABLED, "entry_grid_live_enabled": settings.ENTRY_GRID_LIVE_ENABLED, "entry_grid_orders": [settings.ENTRY_GRID_MIN_ORDERS, settings.ENTRY_GRID_MAX_ORDERS], "entry_grid_price_step": settings.ENTRY_GRID_PRICE_STEP, "entry_grid_min_order_usdc": settings.ENTRY_GRID_MIN_ORDER_USDC, "entry_confidence": settings.MIN_ENTRY_CONFIDENCE, "max_held_win_probability_for_exit": settings.MAX_HELD_WIN_PROBABILITY_FOR_EXIT, "partial_exit_confidence": settings.PARTIAL_EXIT_CONFIDENCE, "entry_notional_usdc": settings.PAPER_ENTRY_NOTIONAL_USDC, "max_entry_price": settings.PAPER_MAX_ENTRY_PRICE, "min_entry_price": settings.PAPER_MIN_ENTRY_PRICE, "min_entry_edge": settings.PAPER_MIN_ENTRY_NET_EDGE, "value_safety_margin": settings.ENTRY_VALUE_SAFETY_MARGIN, "min_expected_pnl": settings.ACTION_VALUE_MIN_EXPECTED_PNL_USDC, "probability_model_weight": settings.ACTION_PROBABILITY_MODEL_WEIGHT, "adaptive_position_sizing": settings.ADAPTIVE_POSITION_SIZING_ENABLED, "position_size_tiers": settings.POSITION_SIZE_EDGE_TIERS, "realistic_execution": settings.EXECUTION_SIMULATION_ENABLED, "model_time_gates_enabled": settings.MODEL_TIME_GATES_ENABLED, "entry_start_seconds": settings.PAPER_MIN_ENTRY_SECONDS_AFTER_OPEN, "last_entry_remaining_seconds": settings.PAPER_LAST_ENTRY_SECONDS_BEFORE_CLOSE, "five_stage_exit": settings.FIVE_STAGE_EXIT_ENABLED, "exit_profit_steps": settings.EXIT_STAGE_PROFIT_RETURN_PCT, "exit_risk_steps": settings.EXIT_STAGE_MAX_HELD_PROBABILITY, "action_value": action_value_overview()},
         "next_event": next_event,
         "active_trading": active_trading,
         "dataset": dataset,
@@ -1294,6 +1731,10 @@ def overview() -> dict[str, Any]:
             "pr_auc": "Precision–Recall AUC: качество поиска положительного исхода при дисбалансе классов. Сравнивается с базовой долей положительных меток, а не автоматически с 0.5.",
             "brier": "Средняя квадратичная ошибка вероятности. Ниже лучше; строго наказывает чрезмерную уверенность.",
             "log_loss": "Логарифмическая ошибка вероятности. Ниже лучше; особенно сильно наказывает уверенные ошибки.",
+            "average_entry_price": "Простое среднее фактических цен исполненных BUY-заявок: каждый fill имеет одинаковый вес.",
+            "weighted_average_entry_price": "Средневзвешенная цена входа (VWAP): фактическая цена каждого BUY-fill взвешена числом купленных контрактов.",
+            "average_exit_price": "Простое среднее фактических цен исполненных SELL/CLOSE-заявок: каждый fill имеет одинаковый вес.",
+            "weighted_average_exit_price": "Средневзвешенная цена выхода (VWAP): фактическая цена каждого SELL/CLOSE-fill взвешена числом проданных контрактов.",
         },
     }
 
@@ -1645,7 +2086,7 @@ def timeseries(minutes: int = Query(default=15, ge=1, le=1440)) -> dict[str, Any
 
 @app.get("/api/trades")
 def trade_list(limit: int = Query(default=40, ge=1, le=200)) -> dict[str, Any]:
-    """Последние demo и live позиции для утреннего офлайн-разбора."""
+    """Последние позиции и пропущенные события для офлайн-разбора."""
     connection = connect()
     if connection is None:
         return {"trades": []}
@@ -1655,28 +2096,59 @@ def trade_list(limit: int = Query(default=40, ge=1, le=200)) -> dict[str, Any]:
         for source, table in (("paper", "paper_positions"), ("live", "live_positions")):
             if table not in tables:
                 continue
-            for row in connection.execute(
+            source_rows = [dict(row) for row in connection.execute(
                 f"""SELECT p.id,p.event_slug,p.outcome,p.status,p.opened_at,p.closed_at,
                            p.average_price,p.current_price,p.close_price,p.shares,p.cost_usdc,
-                           p.realized_pnl_usdc,p.entry_decision_id,p.exit_decision_id,
+                           p.realized_pnl_usdc,p.fees_usdc,p.entry_decision_id,p.exit_decision_id,
                            p.exit_timing,p.had_early_exit,p.early_exit_pnl_usdc,
                            p.execution_valid,p.invalid_reason,
                            COALESCE(d.model_name,'unknown') entry_model,COALESCE(d.reason,'') entry_reason
                     FROM {table} p LEFT JOIN model_decisions d ON d.id=p.entry_decision_id
                     ORDER BY p.opened_at DESC LIMIT ?""",
                 (limit,),
-            ):
-                item = dict(row)
+            )]
+            if source == "live":
+                source_rows = _display_settle_ended_live_positions(connection, source_rows)
+            for item in source_rows:
                 item["source"] = source
                 mark = next((item.get(key) for key in ("current_price", "close_price", "average_price") if item.get(key) is not None), 0)
                 item["marked_pnl_usdc"] = (
                     float(item.get("realized_pnl_usdc") or 0)
-                    if item.get("status") in {"closed", "resolved"}
+                    if item.get("status") in {"closed", "resolved", "provisionally_resolved"}
                     else float(item.get("shares") or 0) * float(mark) - float(item.get("cost_usdc") or 0)
                 )
                 rows.append(item)
         rows.sort(key=lambda row: str(row.get("opened_at") or ""), reverse=True)
-        return {"trades": rows[:limit]}
+        enrich_events(rows)
+
+        # Одно событие может содержать сотни WAIT-наблюдений. Для панели оставляем
+        # только последнее объяснение и явно отделяем его от фактической позиции.
+        skipped: list[dict[str, Any]] = []
+        if "model_decisions" in tables:
+            recent_decision_span = max(2_000, limit * 200)
+            skipped = [dict(row) for row in connection.execute(
+                """WITH latest AS (
+                       SELECT event_slug,MAX(id) decision_id,MAX(observed_at) observed_at
+                       FROM model_decisions
+                       WHERE event_slug IS NOT NULL
+                         AND id>=(SELECT MAX(id)-? FROM model_decisions)
+                       GROUP BY event_slug
+                   )
+                   SELECT d.event_slug,d.observed_at,d.action,d.confidence,d.reason,
+                          d.model_name,d.provider,d.predicted_up_probability,
+                          d.predicted_down_probability,d.expected_net_edge
+                   FROM latest l JOIN model_decisions d ON d.id=l.decision_id
+                   WHERE NOT EXISTS (SELECT 1 FROM paper_positions p WHERE p.event_slug=d.event_slug)
+                     AND NOT EXISTS (SELECT 1 FROM live_positions p WHERE p.event_slug=d.event_slug)
+                   ORDER BY d.observed_at DESC LIMIT ?""",
+                (recent_decision_span, limit),
+            )]
+            for item in skipped:
+                item.update({"kind": "skipped", "entered": False})
+            enrich_events(skipped)
+        for item in rows:
+            item.update({"kind": "position", "entered": True})
+        return {"trades": rows[:limit], "skipped_events": skipped}
     finally:
         connection.close()
 
@@ -1698,15 +2170,46 @@ def trade_detail(source: str, position_id: int) -> dict[str, Any]:
         target_row = connection.execute(
             "SELECT target_price,start_time,end_time,source FROM event_targets WHERE event_slug=?", (slug,)
         ).fetchone()
+        try:
+            event_epoch = int(slug.rsplit("-", 1)[-1])
+            event_start = datetime.fromtimestamp(event_epoch, UTC).isoformat()
+            event_end = datetime.fromtimestamp(event_epoch + 300, UTC).isoformat()
+        except (TypeError, ValueError):
+            event_start = str(target_row["start_time"]) if target_row else str(position["opened_at"])
+            event_end = str(target_row["end_time"]) if target_row else str(position.get("closed_at") or datetime.now(UTC).isoformat())
         decision_row = connection.execute(
             "SELECT model_name,confidence,reason,predicted_up_probability,predicted_down_probability FROM model_decisions WHERE id=?",
             (position.get("entry_decision_id"),),
         ).fetchone() if position.get("entry_decision_id") else None
         reference = [dict(row) for row in connection.execute(
-            "SELECT collected_at,reference_price,target_price FROM reference_price_snapshots WHERE event_slug=? ORDER BY collected_at",
+            """SELECT collected_at,reference_price,target_price,source
+               FROM reference_price_snapshots WHERE event_slug=? ORDER BY collected_at""",
             (slug,),
         )]
-        contract = [dict(row) for row in connection.execute(
+        btc = [dict(row) for row in connection.execute(
+            """SELECT collected_at,source,price,confidence,source_timestamp
+               FROM external_prices
+               WHERE collected_at>=? AND collected_at<=?
+                 AND source IN ('chainlink_twap_60s','bybit','okx','pyth')
+               ORDER BY collected_at,id""",
+            (event_start, event_end),
+        )]
+        market = [dict(row) for row in connection.execute(
+            """SELECT collected_at,outcome,best_bid,best_ask,midpoint,best_bid_size,best_ask_size
+               FROM market_snapshots WHERE event_slug=? ORDER BY collected_at,outcome""",
+            (slug,),
+        )]
+        contract = [row for row in market if str(row.get("outcome")) == outcome]
+        decisions = [dict(row) for row in connection.execute(
+            """SELECT observed_at,action,confidence,reason,provider,model_name,executed,
+                      predicted_up_probability,predicted_down_probability,expected_net_edge,
+                      position_state_json,tags_json
+               FROM model_decisions WHERE event_slug=? ORDER BY observed_at,id""",
+            (slug,),
+        )]
+        for row in decisions:
+            row["role"] = "exit" if row.get("position_state_json") or str(row.get("action") or "").upper() in {"HOLD", "CLOSE", "PARTIAL_CLOSE", "SELL"} else "entry"
+        contract_legacy = [dict(row) for row in connection.execute(
             """SELECT collected_at,best_bid,best_ask,midpoint FROM market_snapshots
                WHERE event_slug=? AND outcome=? ORDER BY collected_at""",
             (slug, outcome),
@@ -1722,23 +2225,51 @@ def trade_detail(source: str, position_id: int) -> dict[str, Any]:
             orders = [dict(row) for row in connection.execute(
                 """SELECT action,order_type,requested_price,filled_price,shares,notional_usdc,
                           fee_usdc,slippage_bps,status,created_at,fill_probability,latency_ms,
-                          execution_reason
+                          execution_reason,fill_observed_at
                    FROM paper_orders WHERE session_id=? AND event_slug=? ORDER BY id""",
                 (position.get("session_id"), slug),
             )]
         elif source == "live" and "live_orders" in table_names(connection):
             orders = [dict(row) for row in connection.execute(
                 """SELECT side action,order_type,requested_price,
-                          CASE WHEN matched_size>0 THEN requested_price END filled_price,
-                          matched_size shares,matched_size*requested_price notional_usdc,
-                          0.0 fee_usdc,0.0 slippage_bps,status,created_at,
-                          NULL fill_probability,NULL latency_ms,error execution_reason
+                          CASE WHEN matched_size>0 THEN COALESCE(average_fill_price,requested_price) END filled_price,
+                          matched_size shares,COALESCE(fill_notional_usdc,matched_size*requested_price) notional_usdc,
+                          COALESCE(fee_usdc,0.0) fee_usdc,0.0 slippage_bps,status,created_at,
+                          NULL fill_probability,NULL latency_ms,error execution_reason,
+                          CASE WHEN matched_size>0 THEN last_checked_at END fill_observed_at
                    FROM live_orders WHERE event_slug=? ORDER BY id""", (slug,),
             )]
+        for row in orders:
+            row["submitted_at"] = row.get("created_at")
+            row["filled_at"] = row.get("fill_observed_at") if float(row.get("shares") or 0) > 0 else None
         entry_orders = [row for row in orders if str(row.get("action") or "").startswith("BUY") and float(row.get("shares") or 0) > 0]
+        if not entry_orders and float(position.get("shares") or 0) > 0:
+            entry_orders = [{
+                "shares": float(position.get("shares") or 0),
+                "notional_usdc": float(position.get("cost_usdc") or 0),
+                "fee_usdc": 0.0,
+                "filled_at": position.get("opened_at"),
+                "fill_observed_at": position.get("opened_at"),
+                "filled_price": position.get("average_price"),
+                "requested_price": position.get("average_price"),
+            }]
         original_shares = sum(float(row.get("shares") or 0) for row in entry_orders) or float(position.get("shares") or 0)
         original_cost = sum(float(row.get("notional_usdc") or 0) + float(row.get("fee_usdc") or 0) for row in entry_orders) or float(position.get("cost_usdc") or 0)
+        # Свежая позиция получает финальную обучающую разметку не мгновенно.
+        # До её появления используем только уже записанный движком официальный
+        # или provisional-исход. Это позволяет честно дорисовать HOLD до конца
+        # события, не выводя результат из последней котировки на стороне UI.
+        resolved_label_source = "training_examples" if outcome_label_row else None
         resolved_label = int(outcome_label_row[0]) if outcome_label_row else None
+        if resolved_label is None and position.get("official_label") is not None:
+            resolved_label = int(position["official_label"])
+            resolved_label_source = "official_label"
+        if resolved_label is None and position.get("provisional_label") is not None:
+            resolved_label = int(position["provisional_label"])
+            resolved_label_source = "provisional_label"
+        winning_outcome = str(winning_row[0]) if winning_row else None
+        if winning_outcome is None and resolved_label is not None:
+            winning_outcome = outcome if resolved_label == 1 else ("Down" if outcome == "Up" else "Up")
         hold_to_resolution_pnl = (
             original_shares * resolved_label - original_cost if resolved_label is not None else None
         )
@@ -1754,27 +2285,39 @@ def trade_detail(source: str, position_id: int) -> dict[str, Any]:
         for stage, row in enumerate(exit_orders, start=1):
             row["exit_stage"] = min(stage, 5)
         for point in contract:
-            mark = point.get("best_bid") or point.get("midpoint")
+            mark = point.get("best_bid") if point.get("best_bid") is not None else point.get("midpoint")
             if mark is None:
                 continue
-            hold_value = original_shares * float(mark) - original_cost
+            filled_entries = [order for order in entry_orders
+                              if str(order.get("filled_at") or order.get("fill_observed_at") or "")
+                              <= str(point["collected_at"])]
+            entered_shares = sum(float(order.get("shares") or 0) for order in filled_entries)
+            entered_cost = sum(float(order.get("notional_usdc") or 0) + float(order.get("fee_usdc") or 0)
+                               for order in filled_entries)
+            if entered_shares <= 0:
+                continue
+            hold_value = entered_shares * float(mark) - entered_cost
             hold_pnl_series.append({
-                "t": point["collected_at"], "v": original_shares * float(mark) - original_cost,
+                "t": point["collected_at"], "v": hold_value,
             })
             sold_shares = 0.0
             realized_proceeds = 0.0
             for order in exit_orders:
-                if str(order.get("created_at") or "") > str(point["collected_at"]):
+                fill_time = order.get("filled_at") or order.get("fill_observed_at")
+                if not fill_time or str(fill_time) > str(point["collected_at"]):
                     continue
                 shares = float(order.get("shares") or 0)
                 fill = float(order.get("filled_price") or order.get("requested_price") or 0)
                 sold_shares += shares
                 realized_proceeds += shares * fill - float(order.get("fee_usdc") or 0)
-            remaining = max(0.0, original_shares - sold_shares)
-            actual_pnl_series.append({"t": point["collected_at"], "v": realized_proceeds + remaining * float(mark) - original_cost})
+            remaining = max(0.0, entered_shares - sold_shares)
+            actual_pnl_series.append({
+                "t": point["collected_at"],
+                "v": realized_proceeds + remaining * float(mark) - entered_cost,
+            })
         # Время исхода — конец самой пятиминутки. closed_at может быть позднее,
         # потому что отражает момент получения/записи расчёта, а не конец рынка.
-        resolved_at = (dict(target_row).get("end_time") if target_row else None) or position.get("closed_at")
+        resolved_at = event_end
         if resolved_label is not None and resolved_at:
             hold_pnl_series.append({"t": resolved_at, "v": float(hold_to_resolution_pnl)})
             if actual_pnl is not None:
@@ -1782,10 +2325,18 @@ def trade_detail(source: str, position_id: int) -> dict[str, Any]:
         return {
             "source": source, "position": position,
             "decision": dict(decision_row) if decision_row else None,
-            "target": dict(target_row) if target_row else None,
-            "reference": reference, "contract": contract, "pnl": actual_pnl_series,
+            "target": {**(dict(target_row) if target_row else {}), **event_metadata(slug)},
+            "event_window": {"start": event_start, "end": event_end, "duration_seconds": 300},
+            "reference": reference, "btc": btc, "contract": contract_legacy, "market": market,
+            "decisions": decisions, "pnl": actual_pnl_series,
             "hold_pnl": hold_pnl_series,
             "orders": orders,
+            "fees": {
+                "entry_usdc": sum(float(row.get("fee_usdc") or 0) for row in entry_orders),
+                "exit_usdc": sum(float(row.get("fee_usdc") or 0) for row in exit_orders),
+                "total_usdc": sum(float(row.get("fee_usdc") or 0) for row in orders),
+                "source": "recorded fills",
+            },
             "exit_plan": {
                 "enabled": settings.FIVE_STAGE_EXIT_ENABLED,
                 "completed_stage": int(position.get("exit_stage") or 0),
@@ -1794,9 +2345,10 @@ def trade_detail(source: str, position_id: int) -> dict[str, Any]:
                 "profit_return_thresholds": list(settings.EXIT_STAGE_PROFIT_RETURN_PCT),
             },
             "resolution": {
-                "winning_outcome": str(winning_row[0]) if winning_row else None,
+                "winning_outcome": winning_outcome,
                 "selected_outcome_won": bool(resolved_label) if resolved_label is not None else None,
                 "resolved_label": resolved_label,
+                "resolved_label_source": resolved_label_source,
                 "resolved_at": resolved_at,
                 "had_early_exit": had_early_exit,
                 "hold_to_resolution_pnl_usdc": hold_to_resolution_pnl,

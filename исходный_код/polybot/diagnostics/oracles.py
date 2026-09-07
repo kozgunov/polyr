@@ -12,6 +12,9 @@ import websockets
 
 
 async def check_pyth() -> None:
+    if not str(config.PYTH_API_KEY or "").strip():
+        print("PYTH_SKIPPED API key is not configured")
+        return
     headers = {}
     if config.PYTH_API_KEY:
         headers["Authorization"] = f"Bearer {config.PYTH_API_KEY}"
@@ -33,13 +36,15 @@ async def check_pyth() -> None:
 
 
 async def check_chainlink_rtds() -> None:
+    symbol = str(config.CHAINLINK_SYMBOL or "btc/usd").lower()
+    topic = "crypto_prices_twap_sixty"
     request = {
         "action": "subscribe",
         "subscriptions": [
             {
-                "topic": "crypto_prices_chainlink",
-                "type": "*",
-                "filters": json.dumps({"symbol": config.CHAINLINK_SYMBOL}),
+                "topic": topic,
+                "type": "update",
+                "filters": json.dumps({"symbol": symbol}, separators=(",", ":")),
             }
         ],
     }
@@ -56,15 +61,19 @@ async def check_chainlink_rtds() -> None:
                     message = json.loads(raw_message)
                 except (json.JSONDecodeError, TypeError):
                     continue
-                if message.get("topic") != "crypto_prices_chainlink":
+                if message.get("topic") != topic:
                     continue
                 payload = message.get("payload", {})
-                timestamp = int(payload["timestamp"])
+                try:
+                    timestamp = int(payload["timestamp"])
+                    value = float(payload["value"])
+                except (KeyError, TypeError, ValueError):
+                    # Subscription acknowledgement shares the topic but has no tick.
+                    continue
                 age = time.time() - timestamp / 1000
-                value = float(payload["value"])
-                if payload.get("symbol") != config.CHAINLINK_SYMBOL or value <= 0 or age > 60:
+                if str(payload.get("symbol", "")).lower() != symbol or value <= 0 or age > 20:
                     raise RuntimeError(f"Chainlink RTDS stale/invalid: age={age:.1f}s")
-                print(f"CHAINLINK_RTDS_OK price={value:.2f} age={age:.1f}s")
+                print(f"CHAINLINK_TWAP_60S_OK price={value:.2f} age={age:.1f}s")
                 return
 
 

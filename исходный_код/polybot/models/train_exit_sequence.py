@@ -126,7 +126,7 @@ def train(dataset_path: Path | None = None, output_dir: Path | None = None) -> d
         }
 
     report = {
-        "schema_version": 5, "created_at": datetime.now(UTC).isoformat(),
+        "schema_version": 6, "created_at": datetime.now(UTC).isoformat(),
         "target": target_name,
         "decision_semantics": "first causal CLOSE_NOW trigger versus best of later exit and HOLD, evaluated after fees",
         "features": FEATURES, "rows": len(sampled), "events": len(events), "selected_policy": policy,
@@ -139,9 +139,9 @@ def train(dataset_path: Path | None = None, output_dir: Path | None = None) -> d
         and test["up_closes"] >= 5 and test["down_closes"] >= 5),
         "candidate_only": True}
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    directory = output_dir or settings.MODEL_DIR / "candidates" / f"exit_sequence_v20_{stamp}"
+    directory = output_dir or settings.MODEL_DIR / "candidates" / f"exit_sequence_v21_{stamp}"
     directory.mkdir(parents=True, exist_ok=True)
-    artifact = directory / "exit_sequence_v20.joblib"
+    artifact = directory / "exit_sequence_v21.joblib"
     report_path = directory / "exit_sequence_report.json"
     joblib.dump({"close_classifier": classifier, "advantage_model": regressor, "features": FEATURES,
                  "probability_threshold": policy["probability_threshold"],
@@ -150,7 +150,7 @@ def train(dataset_path: Path | None = None, output_dir: Path | None = None) -> d
                  "shadow_advantage_threshold": shadow_policy["advantage_threshold"], "report": report}, artifact)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     if output_dir is None:
-        version = save_version_bundle("exit_sequence_v20", "exit", [artifact, report_path], report)
+        version = save_version_bundle("exit_sequence_v21", "exit", [artifact, report_path], report)
         report["artifact_version"] = version["version"]
     report.update({"artifact_path": str(artifact), "report_path": str(report_path)})
     return report

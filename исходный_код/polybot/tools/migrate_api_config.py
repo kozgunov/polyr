@@ -45,7 +45,7 @@ def main() -> None:
 # Pyth Core BTC/USD: независимый oracle для validation.
 # Public Hermes требует API key с 18.08.2026.
 # ---------------------------------------------------------------------------
-PYTH_HERMES_URL = "https://hermes.pyth.network"
+PYTH_HERMES_URL = "https://pyth.dourolabs.app/hermes"
 PYTH_API_KEY = ""
 PYTH_BTC_USD_FEED_ID = (
     "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43"

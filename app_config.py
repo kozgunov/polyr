@@ -19,9 +19,21 @@ DATABASE_PATH = DATA_DIR / "market_data.sqlite3"
 PARQUET_ARCHIVE_DIR = DATA_DIR / "parquet_архив"
 PARQUET_ARCHIVE_ENABLED = True
 PARQUET_ROLLOVER_SECONDS = 3600
+# Приоритет исполнения: тяжёлая разметка/архив/retention запускаются одним
+# часовым окном. Новые входы в этот момент запрещены, но открытая позиция
+# продолжает получать котировки и может быть закрыта.
+TRADING_PRIORITY_MODE = True
+MAINTENANCE_ENTRY_PAUSE_ENABLED = True
+MAINTENANCE_ENTRY_PAUSE_MAX_SECONDS = 600
 # Live-записи накапливаются только в пределах одного poll-цикла и фиксируются
 # одной транзакцией. Часовой RAM-cache запрещён: он теряет час данных при сбое.
 COLLECTOR_WRITE_CACHE_MAX_SECONDS = 5.0
+# Live-телеметрия не должна ждать общий SQLite busy_timeout: при lock пакет
+# остаётся в RAM и повторяется на следующем poll, а торговый контур продолжает
+# получать стакан/oracle. Надёжные управляющие записи используют общий timeout.
+COLLECTOR_FLUSH_BUSY_TIMEOUT_MS = 250
+COLLECTOR_FLUSH_RETRY_ATTEMPTS = 2
+COLLECTOR_FLUSH_RETRY_DELAY_SECONDS = 0.05
 RAW_DATA_RETENTION_DAYS = 7
 NORMALIZED_DATA_RETENTION_DAYS = 90
 STORE_RAW_MESSAGES = False
@@ -36,9 +48,9 @@ SQLITE_WRITE_RETRY_DELAY_SECONDS = 0.25
 COLLECTOR_ENABLED = True
 COLLECTOR_BTC_5M_SLUG_PREFIX = "btc-updown-5m"
 COLLECTOR_DEFAULT_EVENT_URL = "https://polymarket.com/event/btc-updown-5m-1785756900"
-COLLECTOR_POLL_SECONDS = 2.0
-COLLECTOR_DISCOVERY_SECONDS = 15
-COLLECTOR_LABEL_INTERVAL_SECONDS = 60
+COLLECTOR_POLL_SECONDS = 1.0
+COLLECTOR_DISCOVERY_SECONDS = 2
+COLLECTOR_LABEL_INTERVAL_SECONDS = 3600
 COLLECTOR_MAX_BOOK_LEVELS = 20
 COLLECTOR_USE_WEBSOCKETS = True
 ENABLE_POLYMARKET_MARKET_WS = False  # REST books are enough at 5s cadence; full WS produced hundreds of messages/sec
@@ -49,7 +61,8 @@ ENABLE_POLYMARKET = True
 ENABLE_BYBIT = True
 ENABLE_OKX = True
 ENABLE_PYTH = False  # Hermes требует API key; включить после заполнения PYTH_API_KEY.
-ENABLE_CHAINLINK_RTDS = False  # disabled: latency is unsuitable for the BTC 5m strategy
+ENABLE_CHAINLINK_RTDS = True  # официальный Chainlink BTC/USD TWAP 60s через Polymarket RTDS
+CHAINLINK_TWAP_WINDOW_SECONDS = 60
 ENABLE_TELEGRAM_NEWS = False
 
 # ---------------------------------------------------------------------------
@@ -58,7 +71,7 @@ ENABLE_TELEGRAM_NEWS = False
 MAX_POLYMARKET_AGE_SECONDS = 15
 MAX_EXCHANGE_AGE_SECONDS = 15
 MAX_PYTH_AGE_SECONDS = 90
-MAX_CHAINLINK_AGE_SECONDS = 90
+MAX_CHAINLINK_AGE_SECONDS = 20
 MAX_TARGET_REFERENCE_AGE_SECONDS = 20
 REQUIRE_OFFICIAL_EVENT_TARGET = True
 MAX_SOURCE_PRICE_DEVIATION_PCT = 0.35
@@ -152,8 +165,8 @@ SEQUENCE_DATASET_PATH = SEQUENCE_DATASET_DIR / "btc_5m_sequences.parquet"
 SEQUENCE_DATASET_MANIFEST_PATH = SEQUENCE_DATASET_DIR / "manifest.json"
 EXIT_SEQUENCE_DATASET_PATH = SEQUENCE_DATASET_DIR / "btc_5m_exit_sequences_v14.parquet"
 EXIT_SEQUENCE_MANIFEST_PATH = SEQUENCE_DATASET_DIR / "exit_manifest_v14.json"
-EXIT_SHADOW_REPORT_PATH = MODEL_DIR / "exit_shadow_tournament_v14.json"
-EXIT_SEQUENCE_SHADOW_ARTIFACT_PATH = MODEL_DIR / "shadow" / "exit_sequence_v14.joblib"
+EXIT_SHADOW_REPORT_PATH = MODEL_DIR / "exit_shadow_tournament_v21.json"
+EXIT_SEQUENCE_SHADOW_ARTIFACT_PATH = MODEL_DIR / "shadow" / "exit_sequence_v21.joblib"
 GPU_MODEL_CATALOG_PATH = PROJECT_ROOT / "настройка_проекта" / "gpu_model_catalog.json"
 GPU_TRAINING_PLAN_PATH = PROJECT_ROOT / "настройка_проекта" / "gpu_training_plan.json"
 GPU_REQUIREMENTS_PATH = PROJECT_ROOT / "настройка_проекта" / "requirements-gpu.txt"
@@ -171,6 +184,7 @@ GPU_NUM_WORKERS = 4
 EVENT_HISTORY_WINDOWS = (0, 3, 12)
 EVENT_HISTORY_LIVE_WINDOWS = (3, 12)
 HISTORY_CONTEXT_REPORT_PATH = MODEL_DIR / "history_context_walk_forward.json"
+TIMESERIES_CHALLENGER_REPORT_PATH = MODEL_DIR / "timeseries_arima_garch_shadow.json"
 HISTORY_MODEL_CANDIDATE_DIR = MODEL_CANDIDATE_DIR / "history_context_v1"
 LOSS_REVERSAL_REPORT_PATH = MODEL_DIR / "loss_reversal_hypothesis.json"
 MIGRATION_MANIFEST_PATH = PROJECT_ROOT / "настройка_проекта" / "migration_manifest.json"
@@ -179,8 +193,8 @@ MIGRATION_MANIFEST_PATH = PROJECT_ROOT / "настройка_проекта" / "
 # Trading controls. Live trading remains disabled by default.
 # ---------------------------------------------------------------------------
 TRADING_MODE = "paper"  # collect_only, paper, shadow, live
-STRATEGY_VERSION = "custom_entry_v25_catboost_exit_v22_full_exit_grid_v20"
-STRATEGY_RUN_LABEL = "v20_full_exit_adaptive_limit_entry_grid_paper"
+STRATEGY_VERSION = "custom_entry_v25_exit_shadow_only_counterfactual_v21"
+STRATEGY_RUN_LABEL = "v21_hold_execution_exit_shadow_counterfactual_paper"
 LIVE_TRADING_ENABLED = True
 KILL_SWITCH = False
 LIVE_EXECUTOR_IMPLEMENTED = True
@@ -218,6 +232,10 @@ MAX_FRESH_ENTRIES_PER_EVENT = 1
 MIN_ENTRY_CONFIDENCE = 0.55
 EARLY_ENTRY_ENABLED = True
 EARLY_EXIT_ENABLED = True
+# Exit-модель продолжает оцениваться и размечаться, но до нового promotion gate
+# её CLOSE/PARTIAL_CLOSE не исполняются. Рабочая позиция удерживается до
+# provisional/официального расчёта, а все альтернативы сравниваются в shadow.
+EARLY_EXIT_EXECUTION_ENABLED = False
 # Вероятность относится к исходу относительно Price to Beat, а не к цене контракта.
 MAX_HELD_WIN_PROBABILITY_FOR_EXIT = 0.30
 PARTIAL_EXIT_CONFIDENCE = 0.62

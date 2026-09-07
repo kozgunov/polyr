@@ -9,12 +9,15 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
+from functools import lru_cache
 from typing import Any
 
 import api_config as api
 import app_config as settings
 from py_clob_client_v2 import ApiCreds, ClobClient, OrderArgs, PartialCreateOrderOptions
 from py_clob_client_v2.clob_types import AssetType, BalanceAllowanceParams, OrderPayload, OrderType, TradeParams
+
+from polybot.trading.fees import platform_fee_usdc
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,18 +222,100 @@ def get_order_trades(order_id: str) -> list[dict[str, Any]]:
     return result
 
 
+def get_account_trades() -> list[dict[str, Any]]:
+    """Возвращает фактическую историю fills текущего CLOB-аккаунта.
+
+    Это авторитетный резервный источник: ордер мог успеть исполниться,
+    даже если локальный polling get_order опоздал или завершился ошибкой.
+    """
+    rows = build_client().get_trades()
+    result: list[dict[str, Any]] = []
+    for row in rows or []:
+        if hasattr(row, "model_dump"):
+            row = row.model_dump()
+        elif hasattr(row, "to_dict"):
+            row = row.to_dict()
+        elif hasattr(row, "__dict__"):
+            row = vars(row)
+        if isinstance(row, dict):
+            result.append(row)
+    return result
+
+
+@lru_cache(maxsize=512)
+def get_market_fee_schedule(condition_id: str) -> dict[str, float | bool | str]:
+    """Возвращает актуальную feeSchedule CLOB V2 для конкретного рынка.
+
+    В V2 комиссия задаётся оператором в момент match. Поэтому
+    ``fee_rate_bps`` в trade history может быть нулём даже для рынка с
+    включённой taker-комиссией. Авторитетен блок ``fd`` market info.
+    """
+    fallback = {
+        "fee_rate": float(settings.POLYMARKET_CRYPTO_TAKER_FEE_RATE),
+        "fee_exponent": 1.0,
+        "taker_only": True,
+        "source": "configured_crypto_fallback",
+    }
+    if not str(condition_id or "").strip():
+        return fallback
+    try:
+        info = build_client().get_clob_market_info(str(condition_id)) or {}
+        details = info.get("fd") or info.get("feeSchedule") or {}
+        if not details:
+            return fallback
+        return {
+            "fee_rate": max(0.0, float(details.get("r", details.get("rate", fallback["fee_rate"])) or 0)),
+            "fee_exponent": max(0.0, float(details.get("e", details.get("exponent", 1.0)) or 1.0)),
+            "taker_only": bool(details.get("to", details.get("takerOnly", True))),
+            "source": "clob_market_info",
+        }
+    except Exception:
+        # Сбой fee endpoint не должен останавливать reconciliation.
+        return fallback
+
+
 def summarize_order_fills(order_id: str) -> dict[str, float]:
     """Считает фактические size/VWAP/fee только по legs указанной заявки."""
-    legs: list[tuple[float, float, float]] = []
+    legs: list[tuple[float, float, float, bool]] = []
     for trade in get_order_trades(order_id):
+        schedule = get_market_fee_schedule(str(trade.get("market") or ""))
         if str(trade.get("taker_order_id") or "") == str(order_id):
             legs.append((float(trade.get("size") or 0), float(trade.get("price") or 0),
-                         float(trade.get("fee_rate_bps") or 0)))
+                         float(trade.get("fee_rate_bps") or 0), True,
+                         float(schedule["fee_rate"]), float(schedule["fee_exponent"]),
+                         bool(schedule["taker_only"])))
         for maker in trade.get("maker_orders") or []:
             if str(maker.get("order_id") or "") == str(order_id):
                 legs.append((float(maker.get("matched_amount") or 0), float(maker.get("price") or 0),
-                             float(maker.get("fee_rate_bps") or 0)))
+                             float(maker.get("fee_rate_bps") or 0), False,
+                             float(schedule["fee_rate"]), float(schedule["fee_exponent"]),
+                             bool(schedule["taker_only"])))
     size = sum(item[0] for item in legs)
     notional = sum(item[0] * item[1] for item in legs)
-    fee = sum(item[0] * item[1] * item[2] / 10_000 for item in legs)
+    fee = sum(matched_trade_fee_usdc(
+        item[0], item[1], item[2], taker=item[3], fee_rate=item[4],
+        fee_exponent=item[5], taker_only=item[6],
+    ) for item in legs)
     return {"size": size, "notional": notional, "vwap": notional / size if size else 0.0, "fee": fee}
+
+
+def matched_trade_fee_usdc(
+    size: float,
+    price: float,
+    fee_rate_bps: float,
+    *,
+    taker: bool,
+    fee_rate: float | None = None,
+    fee_exponent: float = 1.0,
+    taker_only: bool = True,
+) -> float:
+    """Фактическая CLOB fee по feeSchedule рынка.
+
+    ``fee_rate_bps`` оставлен как fallback для старых V1 fills и тестов.
+    Для V2 передаётся десятичная ставка из ``get_clob_market_info().fd``.
+    """
+    rate = float(fee_rate) if fee_rate is not None else float(fee_rate_bps or 0) / 10_000.0
+    return platform_fee_usdc(
+        size, price, taker=taker, fee_rate=rate, fee_exponent=fee_exponent,
+        taker_only=taker_only, fees_enabled=rate > 0,
+    )

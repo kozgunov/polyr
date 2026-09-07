@@ -28,7 +28,9 @@ from polybot.trading.execution_validity import validate_entry_execution, validat
 from polybot.trading.policy import Decision, MarketState, PositionState
 from polybot.trading.live_executor import cancel_order as cancel_live_order
 from polybot.trading.live_executor import get_order as get_live_order
+from polybot.trading.live_executor import get_account_trades
 from polybot.trading.live_executor import market_minimum_size
+from polybot.trading.live_executor import matched_trade_fee_usdc
 from polybot.trading.live_executor import summarize_order_fills
 from polybot.trading.live_executor import submit_limit_order
 
@@ -223,6 +225,7 @@ class PaperEngine:
         self._history_features: dict[str, float] = {}
         self.validation_bad_cycles = 0
         self.last_next_forecast_at = 0.0
+        self.last_live_history_sync_at = 0.0
         self.exit_shadow_artifact = (
             joblib.load(settings.EXIT_SEQUENCE_SHADOW_ARTIFACT_PATH)
             if settings.EXIT_SEQUENCE_SHADOW_ARTIFACT_PATH.exists() else None
@@ -268,6 +271,9 @@ class PaperEngine:
                 "resolution_labeled_at": "TEXT", "settlement_latency_seconds": "REAL",
                 "fees_usdc": "REAL NOT NULL DEFAULT 0", "gross_pnl_usdc": "REAL",
                 "mark_price_updated_at": "TEXT", "ledger_validated": "INTEGER NOT NULL DEFAULT 0",
+                "settlement_source": "TEXT", "provisional_resolution": "INTEGER NOT NULL DEFAULT 0",
+                "provisional_label": "INTEGER", "official_label": "INTEGER",
+                "official_reconciled_at": "TEXT", "provisional_mismatch": "INTEGER",
             },
             "live_orders": {
                 "execution_valid": "INTEGER NOT NULL DEFAULT 1", "invalid_reason": "TEXT",
@@ -415,6 +421,7 @@ class PaperEngine:
             "PAPER_POST_EVENT_SETTLEMENT_ENABLED", "PAPER_POST_EVENT_SETTLEMENT_DELAY_SECONDS",
             "PAPER_POST_EVENT_WIN_BID_THRESHOLD", "PAPER_POST_EVENT_LOSS_ASK_THRESHOLD",
             "PAPER_POST_EVENT_MAX_QUOTE_DISTANCE_SECONDS",
+            "EARLY_EXIT_EXECUTION_ENABLED",
         )
         return json.dumps({key: getattr(settings, key) for key in keys}, ensure_ascii=False)
 
@@ -526,6 +533,25 @@ class PaperEngine:
             ).fetchone()
         if blocked:
             return
+        if requested == "live":
+            blockers: list[str] = []
+            validation = self._control("validation_status", "unknown")
+            if validation != "healthy":
+                blockers.append(f"validation_status={validation}")
+            if not settings.LIVE_EXECUTOR_IMPLEMENTED:
+                blockers.append("live executor is disabled")
+            if not settings.LIVE_TRADING_ENABLED:
+                blockers.append("LIVE_TRADING_ENABLED=false")
+            if settings.KILL_SWITCH:
+                blockers.append("kill switch is active")
+            if blockers:
+                state = "waiting_validation" if blockers == [f"validation_status={validation}"] else "blocked_preflight"
+                self.db.execute(
+                    "INSERT OR REPLACE INTO runtime_controls VALUES('mode_switch_state',?,?,?)",
+                    (state, now(), "; ".join(blockers)),
+                )
+                self.db.commit()
+                return
         self.db.execute(
             "INSERT OR REPLACE INTO runtime_controls VALUES('trading_mode',?,?,?)",
             (requested, now(), "queued mode applied by trading engine while flat"),
@@ -576,21 +602,21 @@ class PaperEngine:
     def _live_total_pnl(self, state: MarketState | None) -> float:
         realized = float(self.db.execute(
             "SELECT COALESCE(SUM(realized_pnl_usdc),0) FROM live_positions "
-            "WHERE status IN ('closed','resolved') AND execution_valid=1"
+            "WHERE status IN ('closed','resolved','provisionally_resolved') AND execution_valid=1"
         ).fetchone()[0])
-        row = self.db.execute("SELECT * FROM live_positions WHERE status='open' LIMIT 1").fetchone()
-        if not row:
-            return realized
-        mark = row["current_price"] or row["average_price"]
-        if state is not None and row["event_slug"] == state.event_slug:
-            mark = state.up_bid if row["outcome"] == "Up" else state.down_bid
-            if mark is not None:
-                self.db.execute(
-                    "UPDATE live_positions SET current_price=?,mark_price_updated_at=? WHERE id=?",
-                    (float(mark), now(), row["id"]),
-                )
-                self.db.commit()
-        return realized + float(row["shares"]) * float(mark or 0) - float(row["cost_usdc"])
+        unrealized = 0.0
+        for row in self.db.execute("SELECT * FROM live_positions WHERE status='open'").fetchall():
+            mark = row["current_price"] or row["average_price"]
+            if state is not None and row["event_slug"] == state.event_slug:
+                mark = state.up_bid if row["outcome"] == "Up" else state.down_bid
+                if mark is not None:
+                    self.db.execute(
+                        "UPDATE live_positions SET current_price=?,mark_price_updated_at=? WHERE id=?",
+                        (float(mark), now(), row["id"]),
+                    )
+            unrealized += float(row["shares"]) * float(mark or 0) - float(row["cost_usdc"])
+        self.db.commit()
+        return realized + unrealized
 
     def _confirmed(self, decision: Decision, state: MarketState, position: PositionState | None) -> Decision:
         if settings.ML_AUTONOMOUS_POLICY_ENABLED and settings.ML_POLICY_SKIP_SIGNAL_CONFIRMATION:
@@ -651,16 +677,23 @@ class PaperEngine:
         return dominant, max(up, down) / count, count
 
     def _latest_event_slug(self) -> str | None:
+        # Не используем следующий pre-open или оставшийся в БД предыдущий рынок
+        # как текущий. Иначе свежесть его старого стакана ошибочно относится к
+        # активной пятиминутке и может принять/заблокировать неверное решение.
+        current_bucket = int(time.time() // 300) * 300
         row = self.db.execute(
-            "SELECT slug FROM events WHERE active=1 AND closed=0 ORDER BY fetched_at DESC LIMIT 1"
+            """SELECT slug FROM events WHERE active=1 AND closed=0
+               AND CAST(SUBSTR(slug,INSTR(slug,'5m-')+3) AS INTEGER)=?
+               ORDER BY fetched_at DESC LIMIT 1""",
+            (current_bucket,),
         ).fetchone()
         return str(row[0]) if row else None
 
     def _price_rows(self, start_iso: str) -> tuple[dict[str, float], dict[str, float]]:
-        enabled = ("bybit", "okx", "pyth")
+        enabled = ("bybit", "okx", "pyth", "chainlink_twap_60s")
         latest_rows = self.db.execute(
             """SELECT p.source,p.price,p.collected_at FROM external_prices p
-               JOIN (SELECT source,MAX(id) id FROM external_prices WHERE source IN (?,?,?) GROUP BY source) x ON p.id=x.id""",
+               JOIN (SELECT source,MAX(id) id FROM external_prices WHERE source IN (?,?,?,?) GROUP BY source) x ON p.id=x.id""",
             enabled,
         ).fetchall()
         current = datetime.now(UTC)
@@ -668,6 +701,7 @@ class PaperEngine:
             "bybit": settings.MAX_EXCHANGE_AGE_SECONDS,
             "okx": settings.MAX_EXCHANGE_AGE_SECONDS,
             "pyth": settings.MAX_PYTH_AGE_SECONDS,
+            "chainlink_twap_60s": settings.MAX_CHAINLINK_AGE_SECONDS,
         }
         latest: dict[str, float] = {}
         for row in latest_rows:
@@ -721,6 +755,8 @@ class PaperEngine:
                 book_age = math.inf
             if book_age > settings.VALIDATION_HARD_STOP_AGE_SECONDS:
                 issues.append(f"polymarket_book:{book_age:.1f}s")
+        else:
+            issues.append("polymarket_book:missing_current_event")
         if not issues:
             self.validation_bad_cycles = 0
             self.db.execute(
@@ -814,8 +850,14 @@ class PaperEngine:
                 reference_age = (current - datetime.fromisoformat(reference_observed_at)).total_seconds()
                 if reference_age <= settings.MAX_TARGET_REFERENCE_AGE_SECONDS:
                     reference_price = float(reference_row[0])
+            if reference_price is None and "chainlink_twap_60s" in latest:
+                # Именно этот 60s TWAP является resolution-source текущих BTC 5m рынков.
+                reference_price = latest["chainlink_twap_60s"]
+                reference_observed_at = current.isoformat()
             if reference_price is None and latest:
-                reference_price = median(latest.values())
+                # Биржевая медиана остаётся быстрым fallback, но не маскируется под oracle.
+                exchange_values = [latest[key] for key in ("bybit", "okx", "pyth") if key in latest]
+                reference_price = median(exchange_values) if exchange_values else None
             if target_price:
                 for lag_seconds in (15, 30, 60):
                     lag_cutoff = (current - timedelta(seconds=lag_seconds)).isoformat()
@@ -1192,6 +1234,19 @@ class PaperEngine:
         self.db.commit()
 
     def _reconcile_live_orders(self) -> None:
+        # Снача восстанавливаем fills из авторитетной CLOB-истории.
+        # Нельзя снача отмечать ордер event_ended: он мог исполниться
+        # на CLOB до границы, пока локальный polling ещё не увидел fill.
+        if time.monotonic() - self.last_live_history_sync_at >= 15.0:
+            try:
+                self._sync_live_fills_from_history()
+            except Exception as exc:
+                self.db.execute(
+                    "INSERT OR REPLACE INTO runtime_controls VALUES('live_fill_sync_state',?,?,?)",
+                    ("error", now(), type(exc).__name__),
+                )
+                self.db.commit()
+            self.last_live_history_sync_at = time.monotonic()
         rows = self.db.execute(
             "SELECT * FROM live_orders WHERE status IN ('submitted','live','partial') ORDER BY id"
         ).fetchall()
@@ -1324,24 +1379,298 @@ class PaperEngine:
                                 (now(), type(exc).__name__, row["id"]))
         self.db.commit()
 
+    @staticmethod
+    def _trade_mapping(row: object) -> dict:
+        if isinstance(row, dict):
+            return row
+        if hasattr(row, "model_dump"):
+            return row.model_dump()
+        if hasattr(row, "to_dict"):
+            return row.to_dict()
+        return vars(row) if hasattr(row, "__dict__") else {}
+
+    def _sync_live_fills_from_history(self) -> int:
+        """Восстанавливает локальный LIVE-ledger по фактическим CLOB fills."""
+        local_rows = self.db.execute("SELECT * FROM live_orders ORDER BY id").fetchall()
+        local = {str(row["order_id"]): row for row in local_rows if row["order_id"]}
+        if not local:
+            return 0
+        aggregates: dict[str, dict[str, float | str | None]] = {}
+
+        def stored_fee_schedule(order_id: str) -> dict[str, float | bool]:
+            """Берёт feeSchedule из уже собранного market payload.
+
+            Bulk-reconciliation запускается часто, поэтому не делаем
+            отдельный HTTP-запрос для каждого исторического ордера.
+            """
+            order = local.get(str(order_id))
+            if order is None:
+                return {}
+            try:
+                row = self.db.execute(
+                    """SELECT m.raw_json FROM markets m
+                       JOIN market_snapshots s ON s.market_id=m.market_id
+                       WHERE s.token_id=? ORDER BY s.id DESC LIMIT 1""",
+                    (str(order["token_id"]),),
+                ).fetchone()
+                payload = json.loads(str(row[0])) if row and row[0] else {}
+                details = (payload.get("_clob_info") or {}).get("fd") or payload.get("feeSchedule") or {}
+                return {
+                    "fee_rate": max(0.0, float(details.get("r", details.get("rate", settings.POLYMARKET_CRYPTO_TAKER_FEE_RATE)) or 0)),
+                    "fee_exponent": max(0.0, float(details.get("e", details.get("exponent", 1.0)) or 1.0)),
+                    "taker_only": bool(details.get("to", details.get("takerOnly", True))),
+                }
+            except (sqlite3.OperationalError, TypeError, ValueError, json.JSONDecodeError):
+                return {}
+
+        def add(
+            order_id: str, size: object, price: object, fee_bps: object,
+            matched_at: object, *, taker: bool, fee_schedule: dict | None = None,
+        ) -> None:
+            if order_id not in local:
+                return
+            quantity = max(0.0, float(size or 0))
+            fill_price = max(0.0, float(price or 0))
+            if quantity <= 0 or fill_price <= 0:
+                return
+            item = aggregates.setdefault(order_id, {"size": 0.0, "notional": 0.0, "fee": 0.0, "matched_at": None})
+            item["size"] = float(item["size"] or 0) + quantity
+            item["notional"] = float(item["notional"] or 0) + quantity * fill_price
+            schedule = fee_schedule or {}
+            # V1 передавал ненулевой fee_rate_bps в fill. Для V2-сделок
+            # с нулём в этом поле и без сохранённого payload применяем
+            # консервативную ставку BTC, а не нулевую комиссию.
+            explicit_rate = (
+                float(schedule["fee_rate"]) if "fee_rate" in schedule
+                else (float(settings.POLYMARKET_CRYPTO_TAKER_FEE_RATE)
+                      if taker and float(fee_bps or 0) <= 0 else None)
+            )
+            item["fee"] = float(item["fee"] or 0) + matched_trade_fee_usdc(
+                quantity, fill_price, float(fee_bps or 0), taker=taker,
+                fee_rate=explicit_rate,
+                fee_exponent=float(schedule.get("fee_exponent", 1.0)),
+                taker_only=bool(schedule.get("taker_only", True)),
+            )
+            if matched_at and (item["matched_at"] is None or str(matched_at) < str(item["matched_at"])):
+                item["matched_at"] = str(matched_at)
+
+        for raw in get_account_trades():
+            trade = self._trade_mapping(raw)
+            taker_order_id = str(trade.get("taker_order_id") or "")
+            add(taker_order_id, trade.get("size"), trade.get("price"),
+                trade.get("fee_rate_bps"), trade.get("match_time"), taker=True,
+                fee_schedule=stored_fee_schedule(taker_order_id))
+            for maker_raw in trade.get("maker_orders") or []:
+                maker = self._trade_mapping(maker_raw)
+                maker_order_id = str(maker.get("order_id") or "")
+                add(maker_order_id, maker.get("matched_amount"), maker.get("price"),
+                    maker.get("fee_rate_bps", trade.get("fee_rate_bps")), trade.get("match_time"), taker=False,
+                    fee_schedule=stored_fee_schedule(maker_order_id))
+
+        changed = 0
+        for order_id, fill in aggregates.items():
+            order = local[order_id]
+            matched = float(fill["size"] or 0)
+            previous = float(order["matched_size"] or 0)
+            notional = float(fill["notional"] or 0)
+            previous_notional = float(order["fill_notional_usdc"] or 0)
+            share_delta = matched - previous
+            notional_delta = notional - previous_notional
+            vwap = notional / matched
+            cumulative_fee = float(fill["fee"] or 0)
+            fee_delta = cumulative_fee - float(order["fee_usdc"] or 0)
+            if max(abs(share_delta), abs(notional_delta), abs(fee_delta)) <= 1e-9:
+                continue
+            complete = matched + 1e-9 >= float(order["requested_size"] or 0)
+            status = "filled" if complete else "partial"
+            self.db.execute(
+                """UPDATE live_orders SET matched_size=?,average_fill_price=?,fill_notional_usdc=?,
+                   fee_usdc=?,fill_source='clob_account_trade_history',status=?,last_checked_at=?,
+                   error=NULL,execution_valid=1,invalid_reason=NULL WHERE id=?""",
+                (matched, vwap, notional, cumulative_fee, status, now(), order["id"]),
+            )
+            position = self.db.execute(
+                "SELECT * FROM live_positions WHERE event_slug=? LIMIT 1", (order["event_slug"],)
+            ).fetchone()
+            if str(order["side"]).upper() == "BUY":
+                if position is None:
+                    opened_at = now()
+                    if fill.get("matched_at"):
+                        try:
+                            opened_at = datetime.fromtimestamp(float(fill["matched_at"]), UTC).isoformat()
+                        except (TypeError, ValueError, OSError, OverflowError):
+                            pass
+                    self.db.execute(
+                        """INSERT INTO live_positions(event_slug,token_id,outcome,status,opened_at,
+                           average_price,shares,cost_usdc,current_price,entry_decision_id,fees_usdc,
+                           ledger_validated,execution_valid) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1)""",
+                        (order["event_slug"], order["token_id"], order["outcome"], "open", opened_at,
+                         vwap, matched, notional + cumulative_fee, vwap, order["decision_id"], cumulative_fee, 1),
+                    )
+                elif str(position["status"]) == "open":
+                    new_shares = float(position["shares"] or 0) + share_delta
+                    new_cost = float(position["cost_usdc"] or 0) + notional_delta + fee_delta
+                    new_fees = float(position["fees_usdc"] or 0) + fee_delta
+                    self.db.execute(
+                        """UPDATE live_positions SET shares=?,cost_usdc=?,average_price=?,fees_usdc=fees_usdc+?,
+                           ledger_validated=1,execution_valid=1,invalid_reason=NULL WHERE id=?""",
+                        (new_shares, new_cost, (new_cost - new_fees) / new_shares,
+                         fee_delta, position["id"]),
+                    )
+                elif str(position["status"]) in {"resolved", "provisionally_resolved", "closed"}:
+                    new_cost = float(position["cost_usdc"] or 0) + notional_delta + fee_delta
+                    basis_shares = float(position["shares"] or 0)
+                    new_fees = float(position["fees_usdc"] or 0) + fee_delta
+                    self.db.execute(
+                        """UPDATE live_positions SET cost_usdc=?,average_price=?,fees_usdc=fees_usdc+?,
+                           realized_pnl_usdc=realized_pnl_usdc-?,ledger_validated=1,
+                           execution_valid=1,invalid_reason=NULL WHERE id=?""",
+                        (new_cost, (new_cost - new_fees) / basis_shares if basis_shares else position["average_price"],
+                         fee_delta, notional_delta + fee_delta, position["id"]),
+                    )
+            elif position is not None and str(position["status"]) == "open":
+                held = float(position["shares"] or 0)
+                sold = min(max(0.0, share_delta), held)
+                fraction = sold / held if held else 0.0
+                pnl = sold * vwap - fee_delta - float(position["cost_usdc"] or 0) * fraction
+                remaining = max(0.0, held - sold)
+                if remaining <= 1e-8:
+                    self.db.execute(
+                        """UPDATE live_positions SET status='closed',shares=0,current_price=?,closed_at=?,
+                           close_price=?,realized_pnl_usdc=realized_pnl_usdc+?,exit_decision_id=?,
+                           exit_timing='early_full_exit',had_early_exit=1,
+                           early_exit_pnl_usdc=early_exit_pnl_usdc+?,fees_usdc=fees_usdc+?,
+                           ledger_validated=1 WHERE id=?""",
+                        (vwap, now(), vwap, pnl, order["decision_id"], pnl, fee_delta, position["id"]),
+                    )
+                else:
+                    self.db.execute(
+                        """UPDATE live_positions SET shares=?,cost_usdc=cost_usdc*?,
+                           realized_pnl_usdc=realized_pnl_usdc+?,exit_timing='early_partial_exit',
+                           had_early_exit=1,early_exit_pnl_usdc=early_exit_pnl_usdc+?,
+                           fees_usdc=fees_usdc+?,ledger_validated=1 WHERE id=?""",
+                        (remaining, 1.0 - fraction, pnl, pnl, fee_delta, position["id"]),
+                    )
+            self.db.execute(
+                """UPDATE live_decision_shadow_orders SET live_fill_price=?,live_fill_size=?,
+                   status='live_filled' WHERE live_order_id=?""", (vwap, matched, order_id),
+            )
+            changed += 1
+        self.db.execute(
+            "INSERT OR REPLACE INTO runtime_controls VALUES('live_fill_sync_state',?,?,?)",
+            ("healthy", now(), f"clob history reconciled; changed={changed}"),
+        )
+        self.db.commit()
+        return changed
+
+    def _recorded_post_event_label(self, event_slug: str, outcome: str) -> tuple[int, str] | None:
+        """Определяет предварительный исход только по данным у самой отсечки."""
+        try:
+            event_end_epoch = int(event_slug.rsplit("-", 1)[-1]) + 300
+            event_end = datetime.fromtimestamp(event_end_epoch, UTC)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if (datetime.now(UTC) - event_end).total_seconds() < settings.PAPER_POST_EVENT_SETTLEMENT_DELAY_SECONDS:
+            return None
+        cutoff = (event_end - timedelta(
+            seconds=float(settings.PAPER_POST_EVENT_MAX_QUOTE_DISTANCE_SECONDS)
+        )).isoformat()
+        quotes = self.db.execute(
+            """SELECT outcome,best_bid,best_ask,collected_at FROM market_snapshots
+               WHERE event_slug=? AND collected_at>=? ORDER BY collected_at DESC,id DESC""",
+            (event_slug, cutoff),
+        ).fetchall()
+        latest: dict[str, sqlite3.Row] = {}
+        for quote in quotes:
+            latest.setdefault(str(quote["outcome"]), quote)
+        held = latest.get(outcome)
+        other = latest.get("Down" if outcome == "Up" else "Up")
+        if held is not None:
+            held_bid = float(held["best_bid"] or 0.0)
+            held_ask = float(held["best_ask"] or 1.0)
+            other_bid = float(other["best_bid"] or 0.0) if other is not None else 0.0
+            if held_bid >= settings.PAPER_POST_EVENT_WIN_BID_THRESHOLD:
+                return 1, "post_event_extreme_quote"
+            if (held_ask <= settings.PAPER_POST_EVENT_LOSS_ASK_THRESHOLD
+                    or other_bid >= settings.PAPER_POST_EVENT_WIN_BID_THRESHOLD):
+                return 0, "post_event_extreme_quote"
+        if not self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='reference_price_snapshots'"
+        ).fetchone():
+            return None
+        reference = self.db.execute(
+            """SELECT target_price,reference_price FROM reference_price_snapshots
+               WHERE event_slug=? AND reference_price IS NOT NULL
+                 AND ABS(unixepoch(collected_at)-?)<=?
+               ORDER BY ABS(unixepoch(collected_at)-?) ASC,id DESC LIMIT 1""",
+            (event_slug, event_end_epoch, float(settings.PAPER_POST_EVENT_MAX_QUOTE_DISTANCE_SECONDS),
+             event_end_epoch),
+        ).fetchone()
+        if reference is None:
+            return None
+        up_label = int(float(reference["reference_price"]) >= float(reference["target_price"]))
+        return (up_label if outcome == "Up" else 1 - up_label), "post_event_reference_price"
+
     def _settle_live_records(self) -> None:
-        """Фиксирует итог в журнале; on-chain Redeem остаётся отдельной операцией Relayer."""
-        rows = self.db.execute("SELECT * FROM live_positions WHERE status='open'").fetchall()
+        """Фиксирует economic PnL; on-chain Redeem остаётся отдельной операцией Relayer."""
+        rows = self.db.execute(
+            "SELECT * FROM live_positions WHERE status IN ('open','provisionally_resolved')"
+        ).fetchall()
         for row in rows:
             label = self.db.execute(
-                "SELECT label FROM training_examples WHERE event_slug=? AND token_id=? LIMIT 1",
-                (row["event_slug"], row["token_id"]),
+                """SELECT label,resolved_at,source FROM event_resolutions
+                   WHERE event_slug=? AND (token_id=? OR outcome=?)
+                   ORDER BY CASE WHEN token_id=? THEN 0 ELSE 1 END LIMIT 1""",
+                (row["event_slug"], row["token_id"], row["outcome"], row["token_id"]),
             ).fetchone()
-            if not label:
+            has_training = self.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='training_examples'"
+            ).fetchone()
+            if not label and has_training:
+                label = self.db.execute(
+                    """SELECT label,labeled_at,label_kind FROM training_examples
+                       WHERE event_slug=? AND (token_id=? OR outcome=?)
+                       ORDER BY CASE WHEN token_id=? THEN 0 ELSE 1 END LIMIT 1""",
+                    (row["event_slug"], row["token_id"], row["outcome"], row["token_id"]),
+                ).fetchone()
+            if label:
+                resolved_label = int(label[0])
+                mismatch = (
+                    int(row["provisional_label"] != resolved_label)
+                    if row["provisional_label"] is not None else 0
+                )
+                payout = float(row["shares"]) * resolved_label
+                pnl = payout - float(row["cost_usdc"])
+                self.db.execute(
+                    """UPDATE live_positions SET status='resolved',current_price=?,closed_at=COALESCE(closed_at,?),
+                       close_price=?,realized_pnl_usdc=?,resolution_labeled_at=?,settlement_source=?,
+                       official_label=?,official_reconciled_at=?,provisional_mismatch=?,
+                       settlement_latency_seconds=MAX(0,unixepoch(?) -
+                         (CAST(SUBSTR(event_slug,INSTR(event_slug,'5m-')+3) AS INTEGER)+300)),
+                       exit_timing=CASE WHEN had_early_exit=1 THEN 'partial_early_then_resolution'
+                                        ELSE 'held_to_resolution' END WHERE id=?""",
+                    (float(resolved_label), now(), float(resolved_label), pnl, label[1], str(label[2]),
+                     resolved_label, now(), mismatch, label[1], row["id"]),
+                )
                 continue
-            payout = float(row["shares"]) * int(label[0])
+            if str(row["status"]) == "provisionally_resolved":
+                continue
+            provisional = self._recorded_post_event_label(str(row["event_slug"]), str(row["outcome"]))
+            if provisional is None:
+                continue
+            resolved_label, source = provisional
+            payout = float(row["shares"]) * resolved_label
             pnl = payout - float(row["cost_usdc"])
             self.db.execute(
-                """UPDATE live_positions SET status='resolved',current_price=?,closed_at=?,close_price=?,
-                   realized_pnl_usdc=realized_pnl_usdc+?,
-                   exit_timing=CASE WHEN had_early_exit=1 THEN 'partial_early_then_resolution' ELSE 'held_to_resolution' END
-                   WHERE id=?""",
-                (float(label[0]), now(), float(label[0]), pnl, row["id"]),
+                """UPDATE live_positions SET status='provisionally_resolved',current_price=?,closed_at=?,
+                   close_price=?,realized_pnl_usdc=?,provisional_resolution=1,provisional_label=?,
+                   settlement_source=?,resolution_labeled_at=?,
+                   settlement_latency_seconds=MAX(0,unixepoch(?) -
+                     (CAST(SUBSTR(event_slug,INSTR(event_slug,'5m-')+3) AS INTEGER)+300)),
+                   exit_timing=CASE WHEN had_early_exit=1 THEN 'partial_early_then_provisional'
+                                    ELSE 'held_to_provisional_resolution' END WHERE id=?""",
+                (float(resolved_label), now(), float(resolved_label), pnl, resolved_label, source,
+                 now(), now(), row["id"]),
             )
         self.db.commit()
 
@@ -1697,8 +2026,10 @@ class PaperEngine:
                shares,notional_usdc,fee_usdc,slippage_bps,status,created_at,price_cap,fill_probability,latency_ms,
                execution_reason,submit_best_bid,submit_best_ask,submit_book_timestamp,fill_best_bid,fill_best_ask,
                fill_observed_at,observed_slippage_bps,book_age_ms_at_submit,book_age_ms_at_fill,
-               fill_probability_kind) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (self.session_id, decision_id, state.event_slug, "PARTIAL_CLOSE" if fraction < 1 else "CLOSE",
+               fill_probability_kind,requested_shares,requested_notional_usdc)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (self.session_id, decision_id, state.event_slug,
+             "CLOSE" if settings.FULL_EXIT_ONLY_ENABLED else ("PARTIAL_CLOSE" if fraction < 1 else "CLOSE"),
              settings.TAKE_PROFIT_ORDER_TYPE if limit_exit else settings.EXIT_ORDER_TYPE, bid, fill, sold_shares,
              gross_proceeds, fee, simulation.slippage_bps if simulation else (0.0 if limit_exit else settings.ESTIMATED_SLIPPAGE_BPS),
              simulation.status if simulation else "filled", now(), cap,
@@ -1706,7 +2037,8 @@ class PaperEngine:
              simulation.reason if simulation else "legacy_exit", submit_bid, submit_ask, submit_book_timestamp,
              submit_bid, submit_ask, now(),
              max(0.0, (float(submit_bid) - fill) / float(submit_bid) * 10_000) if submit_bid else 0.0,
-             submit_book_age_ms, submit_book_age_ms, settings.EXECUTION_FILL_PROBABILITY_KIND),
+             submit_book_age_ms, submit_book_age_ms, settings.EXECUTION_FILL_PROBABILITY_KIND,
+             requested_shares, requested_shares * float(bid)),
         )
         self.db.execute("UPDATE model_decisions SET executed=1 WHERE id=?", (decision_id,))
         self.db.commit()
@@ -1714,7 +2046,8 @@ class PaperEngine:
     def settle_resolved(self) -> None:
         self._refresh_resolution_ledger()
         positions = self.db.execute(
-            "SELECT * FROM paper_positions WHERE status IN ('open','provisionally_resolved')"
+            """SELECT * FROM paper_positions
+               WHERE status IN ('open','provisionally_resolved','quarantined_unresolved')"""
         ).fetchall()
         for row in positions:
             label = self.db.execute(
@@ -1766,7 +2099,12 @@ class PaperEngine:
                 )
                 self.db.execute(
                     "UPDATE paper_sessions SET cash_balance_usdc=cash_balance_usdc+?,realized_pnl_usdc=realized_pnl_usdc+? WHERE session_id=?",
-                    (payout, pnl, row["session_id"]),
+                    (
+                        payout - float(row["cost_usdc"])
+                        if str(row["status"]) == "quarantined_unresolved" else payout,
+                        pnl,
+                        row["session_id"],
+                    ),
                 )
         pending_cf = self.db.execute(
             """SELECT c.*,MAX(t.label) AS joined_label
@@ -1850,12 +2188,32 @@ class PaperEngine:
             held_bid = float(held["best_bid"] or 0.0)
             held_ask = float(held["best_ask"] or 1.0)
             other_bid = float(other["best_bid"] or 0.0) if other is not None else 0.0
+            provisional_source = "post_event_extreme_quote_t_plus_10s"
             if held_bid >= settings.PAPER_POST_EVENT_WIN_BID_THRESHOLD:
                 provisional_label = 1
             elif held_ask <= settings.PAPER_POST_EVENT_LOSS_ASK_THRESHOLD or other_bid >= settings.PAPER_POST_EVENT_WIN_BID_THRESHOLD:
                 provisional_label = 0
             else:
-                continue
+                # На неликвидном завершившемся рынке bid/ask может так и не
+                # дойти до 0.99/0.01. Тогда берём только ближайший к отсечке
+                # зафиксированный reference и Price to Beat. Это остаётся
+                # provisional-бухгалтерией: официальный label позднее сверит PnL.
+                has_reference_table = self.db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='reference_price_snapshots'"
+                ).fetchone()
+                reference = None if has_reference_table is None else self.db.execute(
+                    """SELECT target_price,reference_price,collected_at FROM reference_price_snapshots
+                       WHERE event_slug=? AND reference_price IS NOT NULL
+                         AND ABS(unixepoch(collected_at)-?)<=?
+                       ORDER BY ABS(unixepoch(collected_at)-?) ASC,id DESC LIMIT 1""",
+                    (row["event_slug"], int(event_end.timestamp()),
+                     float(settings.PAPER_POST_EVENT_MAX_QUOTE_DISTANCE_SECONDS), int(event_end.timestamp())),
+                ).fetchone()
+                if reference is None:
+                    continue
+                up_label = int(float(reference["reference_price"]) >= float(reference["target_price"]))
+                provisional_label = up_label if str(row["outcome"]) == "Up" else 1 - up_label
+                provisional_source = "post_event_reference_price_t_plus_10s"
             payout = float(row["shares"]) * provisional_label
             pnl = payout - float(row["cost_usdc"])
             self.db.execute(
@@ -1865,14 +2223,48 @@ class PaperEngine:
                    exit_timing=CASE WHEN had_early_exit=1 THEN 'partial_early_then_provisional'
                                     ELSE 'held_to_provisional_resolution' END,
                    provisional_resolution=1,provisional_label=?,provisional_resolved_at=?,
-                   provisional_source='post_event_extreme_quote_t_plus_10s' WHERE id=?""",
+                   provisional_source=? WHERE id=?""",
                 (float(provisional_label), now(), float(provisional_label), pnl,
-                 provisional_label, now(), row["id"]),
+                 provisional_label, now(), provisional_source, row["id"]),
             )
             self.db.execute(
                 """UPDATE paper_sessions SET cash_balance_usdc=cash_balance_usdc+?,
                    realized_pnl_usdc=realized_pnl_usdc+? WHERE session_id=?""",
                 (payout, pnl, row["session_id"]),
+            )
+        self.db.commit()
+
+    def _quarantine_stale_unresolved_paper_positions(self) -> None:
+        """Освобождает цикл от позиции, для которой потеряны данные расчёта.
+
+        Результат не угадывается и не попадает в PnL. Зарезервированная PAPER-
+        стоимость временно возвращается в cash; когда официальный label появится,
+        ``settle_resolved`` восстановит фактический финансовый результат.
+        """
+        cutoff = int(
+            time.time() - 300 - settings.STALE_POSITION_NEW_SESSION_GRACE_SECONDS
+        )
+        rows = self.db.execute(
+            """SELECT * FROM paper_positions WHERE status='open'
+               AND CAST(SUBSTR(event_slug,INSTR(event_slug,'5m-')+3) AS INTEGER)<?""",
+            (cutoff,),
+        ).fetchall()
+        for row in rows:
+            self.db.execute(
+                """UPDATE paper_positions SET status='quarantined_unresolved',closed_at=?,
+                   close_reason='missing_post_event_resolution_data',
+                   exit_timing='quarantined_unresolved' WHERE id=?""",
+                (now(), row["id"]),
+            )
+            self.db.execute(
+                """UPDATE paper_sessions SET cash_balance_usdc=cash_balance_usdc+?
+                   WHERE session_id=?""",
+                (float(row["cost_usdc"]), row["session_id"]),
+            )
+        if rows:
+            self.db.execute(
+                "INSERT OR REPLACE INTO runtime_controls VALUES('stale_position_recovery',?,?,?)",
+                ("quarantined", now(), f"positions={len(rows)}; awaiting official labels"),
             )
         self.db.commit()
 
@@ -2486,13 +2878,16 @@ class PaperEngine:
         self.db.commit()
         self.settle_resolved()
         self._provisionally_settle_ended_paper_positions()
+        self._quarantine_stale_unresolved_paper_positions()
         self._settle_live_records()
         self._resolve_shadow()
         self._resolve_exit_shadow()
-        self._apply_requested_mode_if_flat()
-        self._apply_pending_models()
         state = self.market_state()
         self._enforce_validation_stop(state)
+        # Отложенный LIVE-запрос применяется только после проверки свежести
+        # именно текущего рынка, а не по статусу прошлого цикла.
+        self._apply_requested_mode_if_flat()
+        self._apply_pending_models()
         if state is not None:
             self._record_next_event_forecast(state)
         self._evaluate_counterfactuals(state)
@@ -2526,6 +2921,21 @@ class PaperEngine:
             state, position, model_key,
             active_collection=(trading_mode == "paper"),
         )
+        maintenance_entry_paused = False
+        if settings.MAINTENANCE_ENTRY_PAUSE_ENABLED:
+            try:
+                pause_until = self._control("maintenance_entry_pause_until", "")
+                maintenance_entry_paused = bool(
+                    pause_until and datetime.fromisoformat(pause_until) > datetime.now(UTC)
+                )
+            except (TypeError, ValueError):
+                maintenance_entry_paused = False
+        if position is None and decision.action.startswith("BUY_") and maintenance_entry_paused:
+            decision = Decision(
+                "WAIT", decision.confidence,
+                "Часовое maintenance-окно: новый вход отложен; данные и выходы продолжают работать",
+                [*decision.tags, "maintenance_entry_pause"], direction=decision.direction,
+            )
         # До записи решения проверяем, что оно технически исполнимо. Иначе dashboard
         # показывал BUY, хотя _buy молча отклонял старый стакан или закрытое событие.
         if position is None and decision.action.startswith("BUY_"):
@@ -2599,6 +3009,21 @@ class PaperEngine:
                 f"{decision.reason}; частичный выход преобразован в полный",
                 [*decision.tags, "full_exit_only"], direction=decision.direction,
                 exit_fraction=1.0,
+            )
+        # Пока exit-кандидат не доказал положительное преимущество над HOLD,
+        # любое его действие остаётся shadow-сигналом. Контрфактические CLOSE
+        # сейчас и HOLD на 15/30/60s + resolution продолжают записываться ниже.
+        if (
+            position is not None
+            and decision.action in {"CLOSE", "PARTIAL_CLOSE"}
+            and not settings.EARLY_EXIT_EXECUTION_ENABLED
+        ):
+            proposed_action = decision.action
+            decision = Decision(
+                "HOLD", decision.confidence,
+                f"Shadow-only {proposed_action}: {decision.reason}",
+                [*decision.tags, "exit_shadow_only", f"proposed_action={proposed_action}"],
+                direction=decision.direction,
             )
         status = self.db.execute("SELECT status FROM paper_sessions WHERE session_id=?", (self.session_id,)).fetchone()[0]
         if status == "forced_stopped" or self._enforce_loss_streak():

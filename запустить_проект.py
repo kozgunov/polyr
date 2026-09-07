@@ -30,6 +30,7 @@ DASHBOARD_URL = "http://127.0.0.1:8765"
 SERVICES = {
     "collector": PROJECT_ROOT / "запуск" / "continuous_btc_collector.py",
     "trading": PROJECT_ROOT / "запустить_демо.py",
+    "exit_shadow": PROJECT_ROOT / "запуск" / "exit_shadow_collector.py",
     "dashboard": PROJECT_ROOT / "запуск" / "run_dashboard.py",
 }
 
@@ -153,6 +154,17 @@ def start_services() -> dict[str, dict[str, object]]:
         finally:
             log_handle.close()
         created_at = psutil.Process(process.pid).create_time()
+        # Аналитика/отрисовка не конкурирует с получением котировок и решением
+        # модели за CPU. Это особенно заметно на текущем маломощном ноутбуке.
+        try:
+            priority = (
+                psutil.ABOVE_NORMAL_PRIORITY_CLASS
+                if name in {"collector", "trading"}
+                else psutil.BELOW_NORMAL_PRIORITY_CLASS
+            )
+            psutil.Process(process.pid).nice(priority)
+        except (AttributeError, psutil.Error):
+            pass
         manifest[name] = {
             "pid": process.pid, "created_at": created_at, "script": str(script), "log": str(log_path),
         }
@@ -183,6 +195,21 @@ def request_trading_mode(mode: str) -> dict[str, object] | None:
     """Выбирает режим через штатный API дашборда, не обходя LIVE-проверки."""
     if mode == "saved":
         return None
+    # Повторный POST при уже активном режиме только конкурировал за SQLite с
+    # горячим стартом collector/trading и мог ложно уронить единый launcher.
+    try:
+        import sqlite3
+        import app_config as settings
+
+        with sqlite3.connect(settings.DATABASE_PATH, timeout=2) as connection:
+            row = connection.execute(
+                "SELECT control_value FROM runtime_controls WHERE control_key='trading_mode'"
+            ).fetchone()
+        if row and str(row[0]).lower() == mode:
+            return {"mode": mode, "queued": False, "message": "режим уже активен"}
+    except (OSError, sqlite3.Error):
+        # При старой/пустой БД штатный API создаст и провалидирует состояние.
+        pass
     payload = json.dumps({"mode": mode, "canary": False}).encode("utf-8")
     request = urllib.request.Request(
         f"{DASHBOARD_URL}/api/trading-mode", data=payload,

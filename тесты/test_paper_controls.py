@@ -147,6 +147,101 @@ def test_post_event_non_extreme_quote_waits_for_official_resolution(tmp_path: Pa
     engine.close()
 
 
+def test_stale_unresolved_position_is_quarantined_without_inventing_pnl(tmp_path: Path) -> None:
+    engine = PaperEngine(tmp_path / "paper.sqlite3")
+    old_epoch = int(datetime.now(UTC).timestamp()) - 300 - 120
+    slug = f"btc-updown-5m-{old_epoch}"
+    cursor = engine.db.execute(
+        """INSERT INTO paper_positions(session_id,event_slug,token_id,outcome,status,opened_at,
+           average_price,shares,cost_usdc) VALUES(?,?,?,?,?,?,?,?,?)""",
+        (engine.session_id, slug, "down", "Down", "open",
+         datetime.fromtimestamp(old_epoch, UTC).isoformat(), .65, 5.0, 3.25),
+    )
+    engine.db.execute(
+        "UPDATE paper_sessions SET cash_balance_usdc=296.75 WHERE session_id=?", (engine.session_id,),
+    )
+    engine.db.commit()
+
+    engine._quarantine_stale_unresolved_paper_positions()
+
+    position = engine.db.execute(
+        "SELECT status,realized_pnl_usdc,close_reason FROM paper_positions WHERE id=?",
+        (cursor.lastrowid,),
+    ).fetchone()
+    session = engine.db.execute(
+        "SELECT cash_balance_usdc,realized_pnl_usdc FROM paper_sessions WHERE session_id=?",
+        (engine.session_id,),
+    ).fetchone()
+    assert tuple(position) == ("quarantined_unresolved", None, "missing_post_event_resolution_data")
+    assert tuple(session) == (300.0, 0.0)
+    engine.close()
+
+
+def test_quarantined_position_is_reconciled_when_official_label_arrives(tmp_path: Path) -> None:
+    engine = PaperEngine(tmp_path / "paper.sqlite3")
+    old_epoch = int(datetime.now(UTC).timestamp()) - 300 - 120
+    slug = f"btc-updown-5m-{old_epoch}"
+    cursor = engine.db.execute(
+        """INSERT INTO paper_positions(session_id,event_slug,token_id,outcome,status,opened_at,
+           average_price,shares,cost_usdc) VALUES(?,?,?,?,?,?,?,?,?)""",
+        (engine.session_id, slug, "down", "Down", "open",
+         datetime.fromtimestamp(old_epoch, UTC).isoformat(), .65, 5.0, 3.25),
+    )
+    engine.db.execute(
+        "UPDATE paper_sessions SET cash_balance_usdc=296.75 WHERE session_id=?", (engine.session_id,),
+    )
+    engine.db.commit()
+    engine._quarantine_stale_unresolved_paper_positions()
+    engine.db.execute(
+        """CREATE TABLE training_examples(
+           id INTEGER PRIMARY KEY,event_slug TEXT,outcome TEXT,token_id TEXT,label INTEGER)"""
+    )
+    engine.db.execute(
+        "INSERT INTO event_resolutions(event_slug,outcome,token_id,label,resolved_at,source) VALUES(?,?,?,?,?,?)",
+        (slug, "Down", "down", 1, datetime.now(UTC).isoformat(), "test_official"),
+    )
+    engine.db.commit()
+
+    engine.settle_resolved()
+
+    position = engine.db.execute(
+        "SELECT status,realized_pnl_usdc,official_label FROM paper_positions WHERE id=?",
+        (cursor.lastrowid,),
+    ).fetchone()
+    session = engine.db.execute(
+        "SELECT cash_balance_usdc,realized_pnl_usdc FROM paper_sessions WHERE session_id=?",
+        (engine.session_id,),
+    ).fetchone()
+    assert tuple(position) == ("resolved", 1.75, 1)
+    assert tuple(session) == (301.75, 1.75)
+    engine.close()
+
+
+def test_post_event_reference_price_releases_non_extreme_quote(tmp_path: Path) -> None:
+    engine = PaperEngine(tmp_path / "paper.sqlite3")
+    position_id, slug = _ended_event_with_quotes(engine, .60, .61)
+    end_epoch = int(slug.rsplit("-", 1)[-1]) + 300
+    engine.db.execute(
+        """CREATE TABLE reference_price_snapshots(
+           id INTEGER PRIMARY KEY,collected_at TEXT,event_slug TEXT,target_price REAL,
+           reference_price REAL,source_timestamp TEXT,completed INTEGER,source TEXT,raw_json TEXT)"""
+    )
+    engine.db.execute(
+        """INSERT INTO reference_price_snapshots(
+           collected_at,event_slug,target_price,reference_price,completed,source,raw_json)
+           VALUES(?,?,?,?,0,'test','{}')""",
+        (datetime.fromtimestamp(end_epoch, UTC).isoformat(), slug, 100.0, 101.0),
+    )
+    engine.db.commit()
+    engine._provisionally_settle_ended_paper_positions()
+    position = engine.db.execute(
+        "SELECT status,provisional_label,provisional_source FROM paper_positions WHERE id=?",
+        (position_id,),
+    ).fetchone()
+    assert tuple(position) == ("provisionally_resolved", 1, "post_event_reference_price_t_plus_10s")
+    engine.close()
+
+
 def test_official_resolution_reconciles_provisional_mismatch(tmp_path: Path) -> None:
     engine = PaperEngine(tmp_path / "paper.sqlite3")
     position_id, slug = _ended_event_with_quotes(engine, .99, 1.0)
@@ -171,6 +266,52 @@ def test_official_resolution_reconciles_provisional_mismatch(tmp_path: Path) -> 
     ).fetchone()
     assert tuple(position) == ("resolved", 0.0, 0, 1, -4.0)
     assert tuple(session) == (296.0, -4.0)
+    engine.close()
+
+
+def test_live_position_uses_provisional_close_then_official_reconciliation(tmp_path: Path) -> None:
+    engine = PaperEngine(tmp_path / "live-settlement.sqlite3")
+    end_epoch = int(datetime.now(UTC).timestamp()) - 30
+    slug = f"btc-updown-5m-{end_epoch - 300}"
+    quote_at = datetime.fromtimestamp(end_epoch, UTC) - timedelta(seconds=1)
+    engine.db.execute(
+        """CREATE TABLE IF NOT EXISTS market_snapshots(
+           id INTEGER PRIMARY KEY,event_slug TEXT,outcome TEXT,best_bid REAL,best_ask REAL,collected_at TEXT)"""
+    )
+    engine.db.execute(
+        "INSERT INTO market_snapshots(event_slug,outcome,best_bid,best_ask,collected_at) VALUES(?,?,?,?,?)",
+        (slug, "Up", .99, None, quote_at.isoformat()),
+    )
+    engine.db.execute(
+        "INSERT INTO market_snapshots(event_slug,outcome,best_bid,best_ask,collected_at) VALUES(?,?,?,?,?)",
+        (slug, "Down", None, .01, quote_at.isoformat()),
+    )
+    cursor = engine.db.execute(
+        """INSERT INTO live_positions(event_slug,token_id,outcome,status,opened_at,average_price,
+           shares,cost_usdc,current_price,ledger_validated) VALUES(?,?,?,?,?,?,?,?,?,1)""",
+        (slug, "down", "Down", "open", datetime.fromtimestamp(end_epoch - 300, UTC).isoformat(),
+         .49, 5.0, 2.45, .49),
+    )
+    engine.db.commit()
+
+    engine._settle_live_records()
+    provisional = engine.db.execute(
+        """SELECT status,realized_pnl_usdc,provisional_label,settlement_source
+           FROM live_positions WHERE id=?""", (cursor.lastrowid,),
+    ).fetchone()
+    assert tuple(provisional) == ("provisionally_resolved", -2.45, 0, "post_event_extreme_quote")
+
+    engine.db.execute(
+        "INSERT INTO event_resolutions(event_slug,outcome,token_id,label,resolved_at,source) VALUES(?,?,?,?,?,?)",
+        (slug, "Down", "down", 1, datetime.now(UTC).isoformat(), "official_test"),
+    )
+    engine.db.commit()
+    engine._settle_live_records()
+    official = engine.db.execute(
+        """SELECT status,realized_pnl_usdc,official_label,provisional_mismatch
+           FROM live_positions WHERE id=?""", (cursor.lastrowid,),
+    ).fetchone()
+    assert tuple(official) == ("resolved", 2.55, 1, 1)
     engine.close()
 
 
@@ -326,9 +467,11 @@ def test_unfilled_gtd_order_can_fill_later_as_maker(tmp_path: Path, monkeypatch:
     position = engine.db.execute(
         "SELECT outcome,shares,average_price,fees_usdc FROM paper_positions WHERE status='open'"
     ).fetchone()
-    order = engine.db.execute("SELECT status,execution_reason FROM paper_orders").fetchone()
+    order = engine.db.execute(
+        "SELECT status,execution_reason,filled_price,shares,notional_usdc FROM paper_orders"
+    ).fetchone()
     assert tuple(position) == ("Up", 4.0, 0.69, 0.0)
-    assert tuple(order) == ("filled", "gtd_resting_maker_fill")
+    assert tuple(order) == ("filled", "gtd_resting_maker_fill", 0.69, 4.0, 2.76)
     engine.close()
 
 
@@ -343,6 +486,33 @@ def test_entry_and_exit_models_are_independent(tmp_path: Path) -> None:
     engine.db.commit()
     assert engine._control("selected_entry_model", "") == "catboost"
     assert engine._control("selected_exit_model", "") == "qwen"
+    engine.close()
+
+
+def test_queued_live_waits_for_current_healthy_validation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = PaperEngine(tmp_path / "paper.sqlite3")
+    monkeypatch.setattr("polybot.trading.paper_engine.settings.LIVE_EXECUTOR_IMPLEMENTED", True)
+    monkeypatch.setattr("polybot.trading.paper_engine.settings.LIVE_TRADING_ENABLED", True)
+    monkeypatch.setattr("polybot.trading.paper_engine.settings.KILL_SWITCH", False)
+    for key, value in (
+        ("trading_mode", "paper"),
+        ("requested_trading_mode", "live"),
+        ("validation_status", "degraded"),
+    ):
+        engine.db.execute("INSERT OR REPLACE INTO runtime_controls VALUES(?,?,?,?)", (key, value, "now", "test"))
+    engine.db.commit()
+
+    engine._apply_requested_mode_if_flat()
+    assert engine._control("trading_mode", "") == "paper"
+    assert engine._control("mode_switch_state", "") == "waiting_validation"
+
+    engine.db.execute(
+        "INSERT OR REPLACE INTO runtime_controls VALUES('validation_status','healthy','now','test')"
+    )
+    engine.db.commit()
+    engine._apply_requested_mode_if_flat()
+    assert engine._control("trading_mode", "") == "live"
+    assert engine._control("mode_switch_state", "") == "active"
     engine.close()
 
 

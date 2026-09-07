@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Polybot Control Center</title>
-  <link rel="stylesheet" href="/static/styles.css?v=17">
-  <link rel="stylesheet" href="/static/paper.css?v=20">
+  <link rel="stylesheet" href="/static/styles.css?v=18">
+  <link rel="stylesheet" href="/static/paper.css?v=21">
 </head>
 <body>
   <header class="topbar">
@@ -20,7 +20,7 @@
     </section>
 
     <nav class="section-nav">
-      <a href="#collection">Сбор</a><a href="#paper">Демо-торговля</a><a href="#market">Рынок</a><a href="#latency">Задержки</a><a href="#model">Модель</a><a href="#system">Ресурсы</a><a href="#economics">Экономика</a><a href="#access">Доступы</a><a href="#database">База</a>
+      <a href="#collection">Сбор</a><a href="#paper">Торговля</a><a href="#trade-review">Разбор сделок</a><a href="#market">Рынок</a><a href="#latency">Задержки</a><a href="#model">Модель</a><a href="#system">Ресурсы</a><a href="#economics">Экономика</a><a href="#access">Доступы</a><a href="#database">База</a>
       <button id="refreshNow" class="nav-action">Обновить</button><button id="exportNow" class="nav-action">Экспорт CSV</button>
     </nav>
 
@@ -46,7 +46,7 @@
       <details class="panel"><summary>Заявки и фактическое исполнение</summary><div id="orderAudit" class="activity-list"></div></details>
       <details class="panel" open><summary>Следующее событие · активные pre-open shadow-лимиты</summary><p class="muted">Только актуальные заявки будущей пятиминутки. Отменённые и неисполненные хранятся для обучения, но здесь не мешают.</p><div id="preopenShadowOrders" class="activity-list"><p class="empty">Ждём доступный стакан следующего события</p></div><div id="preopenLifecycle" class="performance-grid compact-grid"></div></details>
       <div class="paper-columns">
-        <div><p class="eyebrow paper-title">ПОЗИЦИИ И РЕЗУЛЬТАТЫ</p><div id="paperPositions" class="activity-list"><p class="empty">Позиции ещё не открывались</p></div></div>
+        <div><div class="positions-heading"><p class="eyebrow paper-title">ПОЗИЦИИ И РЕЗУЛЬТАТЫ</p><select id="positionFilter" class="comparison-sort" aria-label="Фильтр событий"><option value="all">Все события</option><option value="entered">Зашла в позицию</option><option value="skipped">Не зашла в позицию</option></select></div><div id="paperPositions" class="activity-list"><p class="empty">События ещё не обработаны</p></div></div>
         <div><p class="eyebrow paper-title">ЖУРНАЛ РЕШЕНИЙ</p><div id="paperActions" class="activity-list"><p class="empty">Демо-бот ещё не запущен</p></div></div>
       </div>
       <div class="metrics-heading"><p class="eyebrow metrics-title">ЭФФЕКТИВНОСТЬ МОДЕЛИ · NET ПОСЛЕ КОМИССИЙ</p><button id="toggleMetricHelp" class="control-btn">Что означают метрики?</button></div>
@@ -57,10 +57,21 @@
     </section>
 
     <section id="trade-review" class="panel-section">
-      <div class="section-heading"><div><p class="eyebrow">TRADE REPLAY · DEMO + LIVE</p><h2>Разбор каждой сделки</h2><p class="muted">Точка входа, Price to Beat, выбранная сторона, цена контракта и PnL в моменте сохраняются для офлайн-просмотра.</p></div><div class="db-controls"><select id="tradeSelect" aria-label="Выберите сделку"></select><button id="loadTrade">Открыть график</button></div></div>
+      <div class="section-heading"><div><p class="eyebrow">TRADE REPLAY · PAPER + LIVE</p><h2>Подробный разбор каждой сделки</h2><p class="muted">Графики строятся только по запросу из сохранённых данных и не отнимают ресурсы у торгового цикла. Событие показано от открытия до закрытия пятиминутки.</p></div><div class="db-controls"><select id="tradeSelect" aria-label="Выберите сделку"></select><button id="loadTrade">Построить разбор</button></div></div>
+      <div class="trade-chart-toolbar" aria-label="Управление диапазоном графиков">
+        <div class="trade-range-buttons"><button id="tradeRangeFull" class="control-btn active">Вся пятиминутка</button><button id="tradeRangeEntry" class="control-btn">±60 секунд от входа</button><button id="tradeRangePosition" class="control-btn">Только позиция</button><button id="tradeResetZoom" class="control-btn">Сбросить масштаб</button></div>
+        <span id="tradeChartStatus">Выберите сделку и нажмите «Построить разбор»</span>
+      </div>
       <div id="tradeMeta" class="trade-meta"></div>
-      <div class="trade-chart-wrap"><canvas id="tradeChart"></canvas><div id="tradeTooltip" class="chart-tooltip" hidden></div></div>
-      <div id="tradeLegend" class="legend"></div>
+      <div class="trade-review-grid">
+        <article class="trade-plot"><h3>1 · BTC и Price to Beat</h3><p>Chainlink TWAP и биржевые цены на общей долларовой шкале. Разрывы в данных не соединяются.</p><div class="trade-canvas-wrap"><canvas id="tradeBtcChart"></canvas><div class="chart-tooltip trade-tooltip" hidden></div></div></article>
+        <article class="trade-plot"><h3>2 · Polymarket и лимитные заявки</h3><p>Фактические bid/ask Up и Down. Отдельно отмечены отправка LIMIT и подтверждённый fill.</p><div class="trade-canvas-wrap"><canvas id="tradeMarketChart"></canvas><div class="chart-tooltip trade-tooltip" hidden></div></div></article>
+        <article class="trade-plot"><h3>3 · Уверенность entry-модели</h3><p>Только сохранённые P(Up)/P(Down), без интерполяции между решениями.</p><div class="trade-canvas-wrap"><canvas id="tradeEntryConfidenceChart"></canvas><div class="chart-tooltip trade-tooltip" hidden></div></div></article>
+        <article class="trade-plot"><h3>4 · Уверенность exit-модели</h3><p>Вероятность удерживаемой стороны и фактические решения HOLD/CLOSE.</p><div class="trade-canvas-wrap"><canvas id="tradeExitConfidenceChart"></canvas><div class="chart-tooltip trade-tooltip" hidden></div></div></article>
+        <article class="trade-plot trade-plot-wide"><h3>5 · Фактический PnL против HOLD</h3><p>Стратегия учитывает реально записанные fills и комиссии; HOLD показывает контрфактуальный результат той же позиции.</p><div class="trade-canvas-wrap trade-canvas-wide"><canvas id="tradePnlChart"></canvas><div class="chart-tooltip trade-tooltip" hidden></div></div></article>
+      </div>
+      <div id="tradeLegend" class="legend trade-legend" aria-label="Переключатели рядов графика"></div>
+      <p class="trade-interaction-help">Наведение — точные сохранённые значения · колесо — масштаб · перетаскивание — сдвиг · двойной клик — вся пятиминутка · легенда — скрыть/показать ряд.</p>
     </section>
 
     <section id="comparison" class="panel-section">
@@ -113,8 +124,8 @@
   </main>
   <div id="toastArea" class="toast-area"></div>
   <footer>Polybot Control Center · данные остаются на локальной машине</footer>
-  <script defer src="/static/app.js?v=22"></script>
-  <script defer src="/static/trade_v11.js?v=17"></script>
+  <script defer src="/static/app.js?v=24"></script>
+  <script defer src="/static/trade_v12.js?v=1"></script>
   <script defer src="/static/experiment_ui.js?v=17"></script>
 </body>
 </html>

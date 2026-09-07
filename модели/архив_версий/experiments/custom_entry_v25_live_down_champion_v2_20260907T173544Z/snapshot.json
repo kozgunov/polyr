@@ -1,0 +1,93 @@
+{
+  "version": "custom_entry_v25_live_down_champion_v2",
+  "created_at": "2026-09-07T17:35:44.212958+00:00",
+  "selected_entry_model": "custom",
+  "selected_exit_model": "catboost",
+  "effective_exit_implementation": "catboost held-outcome probability + analytical CLOSE-vs-HOLD fallback",
+  "strategy_version": "custom_entry_v25_exit_shadow_only_counterfactual_v21",
+  "run_label": "v21_hold_execution_exit_shadow_counterfactual_paper",
+  "paper": {
+    "positions": 807,
+    "completed": 805,
+    "net_pnl_usdc": 85.76217894282023,
+    "wins": 483,
+    "losses": 322,
+    "up": 326,
+    "down": 481,
+    "early_exits": 195,
+    "first_event": "2026-08-03T20:23:23.264902+00:00",
+    "last_event": "2026-09-07T14:26:13.626894+00:00"
+  },
+  "live": {
+    "positions": 75,
+    "completed": 67,
+    "net_pnl_usdc": 71.88544593999985,
+    "wins": 38,
+    "losses": 24,
+    "up": 19,
+    "down": 56,
+    "early_exits": 25,
+    "first_event": "2026-08-07T09:32:18.991693+00:00",
+    "last_event": "2026-09-07T17:35:27.077512+00:00"
+  },
+  "artifacts": [
+    {
+      "key": "custom_entry",
+      "file": "artifacts\\custom_entry.joblib",
+      "sha256": "98b8afa4124a79d0a10614c23ff8ab44b74e1f9a811d4f59941a636d0728e119",
+      "size": 544703
+    },
+    {
+      "key": "catboost_entry",
+      "file": "artifacts\\catboost_entry.cbm",
+      "sha256": "efdaf8dec09525fb8f1bcc0cec8652eea6e6f3b5d931eb5e43996ae0624188ca",
+      "size": 189488
+    },
+    {
+      "key": "catboost_bundle",
+      "file": "artifacts\\catboost_bundle.joblib",
+      "sha256": "615dd0e2c298d8deda2b2873b62f7f733ad08c1bf1d515bb475d73f1837b3f65",
+      "size": 67269
+    },
+    {
+      "key": "exit_value",
+      "source": "C:\\Users\\kozgu\\OneDrive\\Рабочий стол\\poly_project\\модели\\exit_model\\btc_5m_exit_value.joblib",
+      "missing": true
+    }
+  ],
+  "config": {
+    "ml_notionals_usdc": [
+      1.0,
+      2.0,
+      3.0,
+      4.0,
+      5.0,
+      6.0,
+      7.0,
+      8.0,
+      9.0,
+      10.0
+    ],
+    "position_size_tiers": [
+      [
+        0.04,
+        2.0
+      ],
+      [
+        0.08,
+        3.0
+      ],
+      [
+        0.18,
+        5.0
+      ],
+      [
+        0.35,
+        10.0
+      ]
+    ],
+    "partial_exit_enabled": false,
+    "early_exit_execution_enabled": false,
+    "exit_value_enabled": true
+  }
+}
