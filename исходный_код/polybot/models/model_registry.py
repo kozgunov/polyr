@@ -49,6 +49,11 @@ MODEL_SPECS: dict[str, ModelSpec] = {
         "HistGradientBoosting с event-level разбиением и Platt-калибровкой.",
         settings.TRAINING_ARTIFACT_PATH,
     ),
+    "custom_bidir": ModelSpec(
+        "custom_bidir", "Двухсторонняя Up/Down v1", "numeric",
+        "Shadow-challenger с симметричными признаками относительно выбранной стороны.",
+        settings.BIDIRECTIONAL_ENTRY_CANDIDATE_PATH,
+    ),
     "gemma": ModelSpec(
         "gemma", "Gemma 3 1B", "llm",
         "Локальная instruction-LLM; загружается только при выборе.",

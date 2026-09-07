@@ -14,6 +14,7 @@ from polybot.models.model_registry import get_model, model_is_ready
 from polybot.models.action_value import expected_pnl, position_notional
 from polybot.models.exit_value import compare as compare_exit_value
 from polybot.models.train_direction_model import vector
+from polybot.models.bidirectional_entry import vector as bidirectional_vector
 from polybot.trading.fees import net_buy_edge
 from polybot.trading.policy import Decision, MarketState, PositionState
 
@@ -29,6 +30,11 @@ def _catboost_artifact() -> tuple[CatBoostClassifier, dict[str, Any]]:
     model.load_model(str(settings.CATBOOST_ARTIFACT_PATH))
     metadata = joblib.load(settings.CATBOOST_METADATA_PATH) if settings.CATBOOST_METADATA_PATH.exists() else {}
     return model, metadata
+
+
+@lru_cache(maxsize=1)
+def _bidirectional_artifact() -> dict[str, Any]:
+    return joblib.load(settings.BIDIRECTIONAL_ENTRY_CANDIDATE_PATH)
 
 
 def _features(state: MarketState, outcome: str) -> dict[str, Any]:
@@ -79,6 +85,21 @@ def _calibrate(raw: float, calibrator: Any | None) -> float:
 
 def probability_up(state: MarketState, model_key: str = "custom") -> float:
     """Вероятность Up от выбранной числовой модели с симметрией Up/Down."""
+    if model_key == "custom_bidir":
+        artifact = _bidirectional_artifact()
+        model = artifact["model"]
+        calibrator = artifact.get("calibrator")
+        windows = tuple(int(value) for value in artifact.get("history_windows", (3, 12)))
+        scores = {}
+        for outcome in ("Up", "Down"):
+            opposite = "Down" if outcome == "Up" else "Up"
+            row = bidirectional_vector(
+                state.event_slug, outcome, state.observed_at, _features(state, outcome),
+                _features(state, opposite), state.history_features, history_windows=windows,
+            )
+            scores[outcome] = _calibrate(float(model.predict_proba([row])[0][1]), calibrator)
+        total = max(1e-9, scores["Up"] + scores["Down"])
+        return float(max(0.001, min(0.999, scores["Up"] / total)))
     if model_key == "custom":
         artifact = _custom_artifact()
         model = artifact["model"]

@@ -155,6 +155,8 @@ AUTO_RETRAIN_ENABLED = False
 RETRAIN_EVERY_NEW_EVENTS = 100
 MODEL_CANDIDATE_DIR = MODEL_DIR / "candidates"
 TRAINING_ARTIFACT_PATH = MODEL_DIR / "своя_дообученная" / "btc_5m_direction.joblib"
+BIDIRECTIONAL_ENTRY_CANDIDATE_PATH = MODEL_CANDIDATE_DIR / "bidirectional_entry_v1.joblib"
+BIDIRECTIONAL_ENTRY_REPORT_PATH = MODEL_DIR / "bidirectional_entry_v1_report.json"
 QWEN_TRAINING_DATASET_PATH = EXPORT_DIR / "qwen_trade_instructions.jsonl"
 PREPARED_TRAINING_DIR = DATA_DIR / "подготовленные_обучения"
 
@@ -389,7 +391,7 @@ COUNTERFACTUAL_ACTIONS = ("BUY_UP", "BUY_DOWN", "WAIT", "HOLD", "CLOSE")
 # Все три модели получают одинаковые независимые события; shadow не управляет капиталом.
 SHADOW_TOURNAMENT_ENABLED = True
 # Qwen/Gemma запускаются вручную и не задерживают локальный collector.
-SHADOW_MODELS = ("catboost", "custom")
+SHADOW_MODELS = ("catboost", "custom", "custom_bidir")
 SHADOW_SAMPLE_SECONDS = 15
 MODEL_HEALTH_WINDOWS = (30, 100, 300)
 DRIFT_ALERT_ROC_AUC = 0.52
